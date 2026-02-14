@@ -11,11 +11,12 @@
 let white = [' ' '\t']+
 let newline = '\r' | '\n' | "\r\n"
 let nat = ['0'-'9']+
+let literal_char = '\'' ( [^'\'' '\\'] | '\\' _ ) '\''
+let literal_string = '"' ( [^'"' '\\'] | '\\' _ )* '"'
 let comment = "(*" ([^'*'] | '*' [^')'])* "*)"
 let ident_tvar = '\'' ['a'-'z'] ['a'-'z' '0'-'9' '_']*
 let ident_var = ['a'-'z'] ['a'-'z' '0'-'9' '_' '\'']*
 let ident_ctor = ['A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']*
-let string_literal = '"' ( [^'"' '\\'] | '\\' _ )* '"'
 
 rule read = parse
   | eof { EOF }
@@ -50,15 +51,32 @@ rule read = parse
   | "match" { MATCH }
   | "with" { WITH }
   | nat { NAT (lexeme lexbuf |> int_of_string) }
-  | ident_tvar { TVAR (lexeme lexbuf) }
-  | ident_var { VAR (lexeme lexbuf) }
-  | ident_ctor { CTOR (lexeme lexbuf) }
-  | string_literal {
+  | literal_char {
+      let s = lexeme lexbuf in
+      let len = String.length s in
+      let content = String.sub s 1 (len - 2) in
+      let c =
+        if String.length content = 1 then content.[0]
+        else match content with
+          | "\\n" -> '\n'
+          | "\\r" -> '\r'
+          | "\\t" -> '\t'
+          | "\\\\" -> '\\'
+          | "\\'" -> '\''
+          | "\\\"" -> '"'
+          | _ -> failwith ("invalid character literal: " ^ s)
+      in
+      CHAR c
+    }
+  | literal_string {
       let s = lexeme lexbuf in
       let len = String.length s in
       let content = String.sub s 1 (len - 2) in
       STRING content
     }
+  | ident_tvar { TVAR (lexeme lexbuf) }
+  | ident_var { VAR (lexeme lexbuf) }
+  | ident_ctor { CTOR (lexeme lexbuf) }
 
 {
   let string_of_lb lexbuf =

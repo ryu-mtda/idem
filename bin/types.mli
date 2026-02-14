@@ -18,7 +18,6 @@ type value =
   | Ctor of string
   | Cted of { c : string; v : value }
   | Tuple of value list
-val string_literal_to_value : string -> value
 
 type expr =
   | Value of value
@@ -52,6 +51,8 @@ type typedef = { vars : string list; t : string; vs : variant list }
 type program = { ts : typedef list; t : term }
 type generator
 
+val char_ctor_map : string StrMap.t
+
 val term_of_value : value -> term
 val term_of_expr : expr -> term
 val value_of_expr : expr -> value
@@ -62,6 +63,10 @@ val is_list_value : value -> bool
 val is_list_term : term -> bool
 val is_int_value : value -> bool
 val is_int_term : term -> bool
+val is_char_value : value -> bool
+val is_char_term : term -> bool
+val is_string_value : value -> bool
+val is_string_term : term -> bool
 val show_base_type : base_type -> string
 val show_iso_type : iso_type -> string
 val show_value : value -> string
@@ -71,6 +76,9 @@ val show_iso : iso -> string
 val show_pairs_lhs : value -> (value * expr) list -> string
 val show_term : term -> string
 val nat_of_int : int -> value
+val char_to_char_ctor : char -> string
+val char_literal_to_value : char -> value
+val string_literal_to_value : string -> value
 val build_storage : 'a -> value -> 'a option StrMap.t
 val collect_vars : value -> string list
 val new_generator : unit -> generator

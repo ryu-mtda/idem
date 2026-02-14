@@ -215,11 +215,11 @@ let rec is_int_term : term -> bool = function
   | Ctor "Z" -> true
   | _ -> false
 
-let is_character_value : value -> bool = function
+let is_char_value : value -> bool = function
   | Ctor ctor -> List.exists (fun c -> c = ctor) (StrMap.bindings char_ctor_map |> List.map snd)
   | _ -> false
 
-let is_character_term : term -> bool = function
+let is_char_term : term -> bool = function
   | Ctor ctor -> List.exists (fun c -> c = ctor) (StrMap.bindings char_ctor_map |> List.map snd)
   | _ -> false
 
@@ -227,7 +227,7 @@ let is_string_value (v : value) : bool =
   let rec aux: value -> bool = function
     | Ctor "Nil" -> true
     | Cted { c = "Cons"; v = Tuple [ head; tail ] } ->
-        is_character_value head && aux tail
+        is_char_value head && aux tail
     | _ -> false
   in
   aux v
@@ -236,7 +236,7 @@ let is_string_term (t : term) : bool =
   let rec aux: term -> bool = function
     | Ctor "Nil" -> true
     | Cted { c = "Cons"; t = Tuple [ head; tail ] } ->
-        is_character_term head && aux tail
+        is_char_term head && aux tail
     | _ -> false
   in
   aux t
@@ -270,7 +270,7 @@ let rec show_value : value -> string = function
   | Unit -> "()"
   | Ctor "Z" -> "0"
   | Ctor "Nil" -> "[]"
-  | what when is_character_value what -> begin
+  | what when is_char_value what -> begin
       let rec lmao : value -> char = function
         | Ctor ctor ->
             let s = StrMap.bindings char_ctor_map
@@ -278,7 +278,7 @@ let rec show_value : value -> string = function
               |> fst in
             String.get s 0
         | Cted { v; _ } -> lmao v
-        | _ -> failwith "impossible: non-character value that satisfies is_character_value"
+        | _ -> failwith "impossible: non-character value that satisfies is_char_value"
       in
       String.make 1 (lmao what)
     end
@@ -383,7 +383,7 @@ let rec show_term : term -> string = function
   | Unit -> "()"
   | Ctor "Z" -> "0"
   | Ctor "Nil" -> "[]"
-  | what when is_character_term what -> begin
+  | what when is_char_term what -> begin
       let rec lmao : term -> char = function
         | Ctor ctor ->
             let s = StrMap.bindings char_ctor_map
@@ -391,7 +391,7 @@ let rec show_term : term -> string = function
               |> fst in
             String.get s 0
         | Cted { t; _ } -> lmao t
-        | _ -> failwith "impossible: non-character term that satisfies is_character_term"
+        | _ -> failwith "impossible: non-character term that satisfies is_char_term"
       in
       String.make 1 (lmao what)
     end
@@ -456,15 +456,18 @@ let rec show_term : term -> string = function
 let rec nat_of_int (n : int) : value =
   if n < 1 then Ctor "Z" else Cted { c = "S"; v = nat_of_int (n - 1) }
 
-let char_to_character_ctor (c : char) : string =
+let char_to_char_ctor (c : char) : string =
   try StrMap.find (String.make 1 c) char_ctor_map
   with Not_found -> failwith ("unsupported character: " ^ String.make 1 c)
+
+let char_literal_to_value (c : char) : value =
+  Ctor (char_to_char_ctor c)
 
 let string_literal_to_value : string -> value =
   let rec chars_to_list idx (s: string): value =
     if idx >= String.length s then Ctor "Nil"
     else
-      let ctor = char_to_character_ctor s.[idx] in
+      let ctor = char_to_char_ctor s.[idx] in
       Cted { c = "Cons"; v = Tuple [Ctor ctor; chars_to_list (idx + 1) s] }
   in
   fun s -> chars_to_list 0 s

@@ -3,4 +3,4 @@ type char = Char0 | Char1 | Char2 | Char3 | Char4 | Char5 | Char6 | Char7 | Char
 type 'a list = Nil | Cons of 'a * 'a list
 
 
-"Hello, world!"
+'H' :: "ello, world!"
