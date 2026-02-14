@@ -15,6 +15,7 @@ let comment = "(*" ([^'*'] | '*' [^')'])* "*)"
 let ident_tvar = '\'' ['a'-'z'] ['a'-'z' '0'-'9' '_']*
 let ident_var = ['a'-'z'] ['a'-'z' '0'-'9' '_' '\'']*
 let ident_ctor = ['A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9']*
+let string_literal = '"' ( [^'"' '\\'] | '\\' _ )* '"'
 
 rule read = parse
   | eof { EOF }
@@ -52,6 +53,12 @@ rule read = parse
   | ident_tvar { TVAR (lexeme lexbuf) }
   | ident_var { VAR (lexeme lexbuf) }
   | ident_ctor { CTOR (lexeme lexbuf) }
+  | string_literal {
+      let s = lexeme lexbuf in
+      let len = String.length s in
+      let content = String.sub s 1 (len - 2) in
+      STRING content
+    }
 
 {
   let string_of_lb lexbuf =

@@ -3,9 +3,9 @@
 %}
 
 %token EOF LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET TIMES PIPE COMMA SEMICOLON CONS
-       ARROW BIARROW EQUAL UNIT LET IN ISO FIX TYPE INVERT REC OF FUN CASE MATCH WITH
+  ARROW BIARROW EQUAL UNIT LET IN ISO FIX TYPE INVERT REC OF FUN CASE MATCH WITH
 %token <int> NAT
-%token <string> TVAR VAR CTOR
+%token <string> TVAR VAR CTOR STRING
 
 %start <program> program
 %type <typedef> typedef
@@ -59,6 +59,7 @@ value_grouped:
   | x = VAR; { Var x }
   | x = CTOR; { Ctor x }
   | n = NAT; { nat_of_int n }
+  | s = STRING; { string_literal_to_value s }
   | LBRACKET; RBRACKET; { Ctor "Nil" }
   | LBRACKET; vs = separated_nonempty_list(SEMICOLON, value); RBRACKET;
     {
@@ -113,6 +114,7 @@ term_grouped:
   | x = VAR; { Var x }
   | x = CTOR; { Ctor x }
   | n = NAT; { nat_of_int n |> term_of_value }
+  | s = STRING; { string_literal_to_value s |> term_of_value }
   | LBRACKET; RBRACKET; { Ctor "Nil" }
   | LBRACKET; ts = separated_nonempty_list(SEMICOLON, term); RBRACKET;
     {

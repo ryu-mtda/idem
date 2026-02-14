@@ -51,6 +51,113 @@ type typedef = { vars : string list; t : string; vs : variant list }
 type program = { ts : typedef list; t : term }
 type generator = { mutable i : int }
 
+let char_ctor_map =
+  let chars =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz \
+     !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+  in
+  let ctors =
+    [
+      "Char0";
+      "Char1";
+      "Char2";
+      "Char3";
+      "Char4";
+      "Char5";
+      "Char6";
+      "Char7";
+      "Char8";
+      "Char9";
+      "CharA";
+      "CharB";
+      "CharC";
+      "CharD";
+      "CharE";
+      "CharF";
+      "CharG";
+      "CharH";
+      "CharI";
+      "CharJ";
+      "CharK";
+      "CharL";
+      "CharM";
+      "CharN";
+      "CharO";
+      "CharP";
+      "CharQ";
+      "CharR";
+      "CharS";
+      "CharT";
+      "CharU";
+      "CharV";
+      "CharW";
+      "CharX";
+      "CharY";
+      "CharZ";
+      "CharLowerA";
+      "CharLowerB";
+      "CharLowerC";
+      "CharLowerD";
+      "CharLowerE";
+      "CharLowerF";
+      "CharLowerG";
+      "CharLowerH";
+      "CharLowerI";
+      "CharLowerJ";
+      "CharLowerK";
+      "CharLowerL";
+      "CharLowerM";
+      "CharLowerN";
+      "CharLowerO";
+      "CharLowerP";
+      "CharLowerQ";
+      "CharLowerR";
+      "CharLowerS";
+      "CharLowerT";
+      "CharLowerU";
+      "CharLowerV";
+      "CharLowerW";
+      "CharLowerX";
+      "CharLowerY";
+      "CharLowerZ";
+      "CharSpace";
+      "CharExclamation";
+      "CharQuote";
+      "CharHash";
+      "CharDollar";
+      "CharPercent";
+      "CharAmpersand";
+      "CharApostrophe";
+      "CharParenLeft";
+      "CharParenRight";
+      "CharAsterisk";
+      "CharPlus";
+      "CharComma";
+      "CharMinus";
+      "CharDot";
+      "CharSlash";
+      "CharColon";
+      "CharSemicolon";
+      "CharLessThan";
+      "CharEqual";
+      "CharGreaterThan";
+      "CharQuestion";
+      "CharAt";
+      "CharBracketLeft";
+      "CharBackslash";
+      "CharBracketRight";
+      "CharCaret";
+      "CharUnderscore";
+      "CharBackquote";
+      "CharBraceLeft";
+      "CharBar";
+      "CharBraceRight";
+      "CharTilde";
+    ]
+  in
+  let explode_string s = List.init (String.length s) (fun n -> String.get s n |> String.make 1) in
+  List.fold_left2 (fun m c ctor -> StrMap.add c ctor m) StrMap.empty (explode_string chars) ctors
+
 let rec term_of_value : value -> term = function
   | Unit -> Unit
   | Var x -> Var x
@@ -108,6 +215,32 @@ let rec is_int_term : term -> bool = function
   | Ctor "Z" -> true
   | _ -> false
 
+let is_character_value : value -> bool = function
+  | Ctor ctor -> List.exists (fun c -> c = ctor) (StrMap.bindings char_ctor_map |> List.map snd)
+  | _ -> false
+
+let is_character_term : term -> bool = function
+  | Ctor ctor -> List.exists (fun c -> c = ctor) (StrMap.bindings char_ctor_map |> List.map snd)
+  | _ -> false
+
+let is_string_value (v : value) : bool =
+  let rec aux: value -> bool = function
+    | Ctor "Nil" -> true
+    | Cted { c = "Cons"; v = Tuple [ head; tail ] } ->
+        is_character_value head && aux tail
+    | _ -> false
+  in
+  aux v
+
+let is_string_term (t : term) : bool =
+  let rec aux: term -> bool = function
+    | Ctor "Nil" -> true
+    | Cted { c = "Cons"; t = Tuple [ head; tail ] } ->
+        is_character_term head && aux tail
+    | _ -> false
+  in
+  aux t
+
 let rec show_base_type : base_type -> string = function
   | Unit -> "unit"
   | Product l ->
@@ -137,6 +270,18 @@ let rec show_value : value -> string = function
   | Unit -> "()"
   | Ctor "Z" -> "0"
   | Ctor "Nil" -> "[]"
+  | what when is_character_value what -> begin
+      let rec lmao : value -> char = function
+        | Ctor ctor ->
+            let s = StrMap.bindings char_ctor_map
+              |> List.find (fun (_, c) -> c = ctor)
+              |> fst in
+            String.get s 0
+        | Cted { v; _ } -> lmao v
+        | _ -> failwith "impossible: non-character value that satisfies is_character_value"
+      in
+      String.make 1 (lmao what)
+    end
   | Ctor x | Var x -> x
   | what when is_int_value what -> begin
       let rec lmao acc : value -> int = function
@@ -146,7 +291,15 @@ let rec show_value : value -> string = function
       lmao 0 what |> string_of_int
     end
   | Cted { c = "Cons"; v = Tuple [ v_1; v_2 ] } as v ->
-      if is_list_value v then
+      if is_string_value v then
+        let rec lmao : value -> string = function
+          | Cted { c = "Cons"; v = Tuple [ v_1; v_2 ] } ->
+            show_value v_1 ^ lmao v_2
+          | Ctor "Nil" -> ""
+          | otherwise -> show_value otherwise
+        in
+        "\"" ^ lmao v ^ "\""
+      else if is_list_value v then
         let rec lmao : value -> string = function
           | Cted { c = "Cons"; v = Tuple [ v_1; v_2 ] } ->
               "; " ^ show_value v_1 ^ lmao v_2
@@ -230,6 +383,18 @@ let rec show_term : term -> string = function
   | Unit -> "()"
   | Ctor "Z" -> "0"
   | Ctor "Nil" -> "[]"
+  | what when is_character_term what -> begin
+      let rec lmao : term -> char = function
+        | Ctor ctor ->
+            let s = StrMap.bindings char_ctor_map
+              |> List.find (fun (_, c) -> c = ctor)
+              |> fst in
+            String.get s 0
+        | Cted { t; _ } -> lmao t
+        | _ -> failwith "impossible: non-character term that satisfies is_character_term"
+      in
+      String.make 1 (lmao what)
+    end
   | Var x | Ctor x -> x
   | Tuple l -> show_tuple show_term l
   | what when is_int_term what -> begin
@@ -240,7 +405,15 @@ let rec show_term : term -> string = function
       lmao 0 what |> string_of_int
     end
   | Cted { c = "Cons"; t = Tuple [ t_1; t_2 ] } as t ->
-      if is_list_term t then
+      if is_string_term t then
+        let rec lmao = function
+          | Cted { c = "Cons"; t = Tuple [ t_1; t_2 ] } ->
+            show_term t_1 ^ lmao t_2
+          | Ctor "Nil" -> ""
+          | otherwise -> show_term otherwise
+        in
+        "\"" ^ lmao t ^ "\""
+       else if is_list_term t then
         let rec lmao = function
           | Cted { c = "Cons"; t = Tuple [ t_1; t_2 ] } ->
               "; " ^ show_term t_1 ^ lmao t_2
@@ -282,6 +455,19 @@ let rec show_term : term -> string = function
 
 let rec nat_of_int (n : int) : value =
   if n < 1 then Ctor "Z" else Cted { c = "S"; v = nat_of_int (n - 1) }
+
+let char_to_character_ctor (c : char) : string =
+  try StrMap.find (String.make 1 c) char_ctor_map
+  with Not_found -> failwith ("unsupported character: " ^ String.make 1 c)
+
+let string_literal_to_value : string -> value =
+  let rec chars_to_list idx (s: string): value =
+    if idx >= String.length s then Ctor "Nil"
+    else
+      let ctor = char_to_character_ctor s.[idx] in
+      Cted { c = "Cons"; v = Tuple [Ctor ctor; chars_to_list (idx + 1) s] }
+  in
+  fun s -> chars_to_list 0 s
 
 let rec build_storage (default : 'a) : value -> 'a option StrMap.t = function
   | Unit -> StrMap.empty

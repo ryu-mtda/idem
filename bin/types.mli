@@ -18,6 +18,7 @@ type value =
   | Ctor of string
   | Cted of { c : string; v : value }
   | Tuple of value list
+val string_literal_to_value : string -> value
 
 type expr =
   | Value of value
