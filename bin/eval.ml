@@ -51,12 +51,12 @@ let rec invert (omega : iso) : iso =
       App { omega_1 = invert omega_1; omega_2 = invert omega_2 }
   | Invert omega -> omega
 
-let rec subst_in_gamma ~(from : string) ~(into : term) ~(what : gamma) : gamma =
+let rec subst_in_idem ~(from : string) ~(into : term) ~(what : idem) : idem =
   match what with
   | Direct { params; body } when not (contains_value from params) ->
       Direct { params; body = subst ~from ~into ~what:body }
   | Composed { omega; gamma } ->
-      Composed { omega; gamma = subst_in_gamma ~from ~into ~what:gamma }
+      Composed { omega; gamma = subst_in_idem ~from ~into ~what:gamma }
   | _ -> what
 
 and subst ~(from : string) ~(into : term) ~(what : term) : term =
@@ -72,9 +72,9 @@ and subst ~(from : string) ~(into : term) ~(what : term) : term =
   | LetIso { phi; omega; t } when phi <> from ->
       LetIso { phi; omega; t = subst t }
   | AppGamma { gamma; t } ->
-      AppGamma { gamma = subst_in_gamma ~from ~into ~what:gamma; t = subst t }
+      AppGamma { gamma = subst_in_idem ~from ~into ~what:gamma; t = subst t }
   | LetIdem { phi; gamma; t } ->
-      LetIdem { phi; gamma = subst_in_gamma ~from ~into ~what:gamma;
+      LetIdem { phi; gamma = subst_in_idem ~from ~into ~what:gamma;
                 t = if phi = from then t else subst t }
   | Fun { x; body } when x <> from ->
       Fun { x; body = subst body }
@@ -116,13 +116,13 @@ and subst_iso_in_expr ~(from : string) ~(into : iso) ~(what : expr) : expr =
       in
       LetVal { p; v; e }
 
-let rec subst_iso_in_gamma ~(from : string) ~(into : iso) ~(what : gamma) : gamma =
+let rec subst_iso_in_idem ~(from : string) ~(into : iso) ~(what : idem) : idem =
   match what with
   | Direct { params; body } ->
       Direct { params; body = subst_iso_in_term ~from ~into ~what:body }
   | Composed { omega; gamma } ->
       Composed { omega = subst_iso ~from ~into ~what:omega;
-                 gamma = subst_iso_in_gamma ~from ~into ~what:gamma }
+                 gamma = subst_iso_in_idem ~from ~into ~what:gamma }
   | Var _ -> what
 
 and subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
@@ -141,10 +141,10 @@ and subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
   | LetIso { phi; omega; t } ->
       LetIso { phi; omega = subst_iso omega; t = subst_iso_in_term t }
   | AppGamma { gamma; t } ->
-      AppGamma { gamma = subst_iso_in_gamma ~from ~into ~what:gamma;
+      AppGamma { gamma = subst_iso_in_idem ~from ~into ~what:gamma;
                  t = subst_iso_in_term t }
   | LetIdem { phi; gamma; t } ->
-      LetIdem { phi; gamma = subst_iso_in_gamma ~from ~into ~what:gamma;
+      LetIdem { phi; gamma = subst_iso_in_idem ~from ~into ~what:gamma;
                 t = subst_iso_in_term t }
   | Fun { x; body } ->
       Fun { x; body = subst_iso_in_term body }
@@ -185,16 +185,16 @@ let rec unify_value (u : value) (v : value) : (string * value) list myresult =
       List.flatten unified
   | _ -> Error ("unable to unify " ^ show_value u ^ " and " ^ show_value v)
 
-let rec subst_gamma_in_gamma ~(from : string) ~(into : gamma) ~(what : gamma) : gamma =
+let rec subst_gamma_in_idem ~(from : string) ~(into : idem) ~(what : idem) : idem =
   match what with
   | Var x when x = from -> into
   | Direct { params; body } ->
       Direct { params; body = subst_gamma_in_term ~from ~into ~what:body }
   | Composed { omega; gamma } ->
-      Composed { omega; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma }
+      Composed { omega; gamma = subst_gamma_in_idem ~from ~into ~what:gamma }
   | _ -> what
 
-and subst_gamma_in_term ~(from : string) ~(into : gamma) ~(what : term) : term =
+and subst_gamma_in_term ~(from : string) ~(into : idem) ~(what : term) : term =
   let subst what = subst_gamma_in_term ~from ~into ~what in
   match what with
   | Cted { c; t } -> Cted { c; t = subst t }
@@ -205,12 +205,12 @@ and subst_gamma_in_term ~(from : string) ~(into : gamma) ~(what : term) : term =
   | LetIso { phi; omega; t } ->
       LetIso { phi; omega; t = subst t }
   | AppGamma { gamma; t } ->
-      AppGamma { gamma = subst_gamma_in_gamma ~from ~into ~what:gamma;
+      AppGamma { gamma = subst_gamma_in_idem ~from ~into ~what:gamma;
                  t = subst t }
   | LetIdem { phi; gamma; t } when phi = from ->
-      LetIdem { phi; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma; t }
+      LetIdem { phi; gamma = subst_gamma_in_idem ~from ~into ~what:gamma; t }
   | LetIdem { phi; gamma; t } ->
-      LetIdem { phi; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma;
+      LetIdem { phi; gamma = subst_gamma_in_idem ~from ~into ~what:gamma;
                 t = subst t }
   | Fun { x; body } ->
       Fun { x; body = subst body }
@@ -262,7 +262,7 @@ let rec eval (t : term) : term myresult =
       let omega = eval_iso omega in
       subst_iso_in_term ~from:phi ~into:omega ~what:t |> eval
   | AppGamma { gamma; t } -> begin
-      let g = eval_gamma gamma in
+      let g = eval_idem gamma in
       match g with
       | Direct { params; body } ->
           let** v = Result.bind (eval t) value_of_term in
@@ -278,7 +278,7 @@ let rec eval (t : term) : term myresult =
       | Var x -> Error ("unbound idem variable: " ^ x)
     end
   | LetIdem { phi; gamma; t } ->
-      let g = eval_gamma gamma in
+      let g = eval_idem gamma in
       subst_gamma_in_term ~from:phi ~into:g ~what:t |> eval
   | Fun _ -> Ok t
   | AppFun { f; t = arg } -> begin
@@ -291,10 +291,10 @@ let rec eval (t : term) : term myresult =
     end
   | _ -> Ok t
 
-and eval_gamma (g : gamma) : gamma =
+and eval_idem (g : idem) : idem =
   match g with
   | Composed { omega; gamma } ->
-      Composed { omega = eval_iso omega; gamma = eval_gamma gamma }
+      Composed { omega = eval_iso omega; gamma = eval_idem gamma }
   | _ -> g
 
 and eval_iso (omega : iso) : iso =

@@ -4,6 +4,6 @@
  (modules parser))
 
 (executable
- (public_name iso2)
- (name iso2)
- (libraries iso2))
+ (public_name idem)
+ (name idem)
+ (libraries idem))

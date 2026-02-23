@@ -397,12 +397,12 @@ and infer_term (t : Types.term) (gen : Types.generator) (ctx : context) :
       let++ { a = a_2; e = e_2 } = infer_term t gen ctx in
       { a = a_2; e = e_1 @ e_2 }
   | AppGamma { gamma; t } ->
-      let** { a = a_g; e = e_g } = infer_gamma gamma gen ctx in
+      let** { a = a_g; e = e_g } = infer_idem gamma gen ctx in
       let++ { a = a_t; e = e_t } = infer_term t gen ctx in
       let fresh = Var (Types.fresh gen) in
       { a = fresh; e = (a_g, Idem a_t) :: (fresh, a_t) :: e_g @ e_t }
   | LetIdem { phi; gamma; t } ->
-      let** { a = a_g; e = e_g } = infer_gamma gamma gen ctx in
+      let** { a = a_g; e = e_g } = infer_idem gamma gen ctx in
       let** ctx = generalize_idem e_g ctx phi a_g in
       let++ { a = a_t; e = e_t } = infer_term t gen ctx in
       { a = a_t; e = e_g @ e_t }
@@ -453,7 +453,7 @@ and check_direct_idempotency (params : Types.value) (body : Types.term) :
        ^ ": variable(s) " ^ vars_str
        ^ " are modified by the transform but used in the body")
 
-and infer_gamma (g : Types.gamma) (gen : Types.generator) (ctx : context) :
+and infer_idem (g : Types.idem) (gen : Types.generator) (ctx : context) :
     inferred myresult =
   match g with
   | Direct { params; body } ->
@@ -469,7 +469,7 @@ and infer_gamma (g : Types.gamma) (gen : Types.generator) (ctx : context) :
       { a = Idem a_params; e = (a_params, a_body) :: e_params @ e_body }
   | Composed { omega; gamma } ->
       let** { a = a_omega; e = e_omega } = infer_iso omega gen ctx in
-      let++ { a = a_gamma; e = e_gamma } = infer_gamma gamma gen ctx in
+      let++ { a = a_gamma; e = e_gamma } = infer_idem gamma gen ctx in
       let fresh_a = Var (Types.fresh gen) in
       let fresh_b = Var (Types.fresh gen) in
       { a = Idem fresh_a;

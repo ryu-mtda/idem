@@ -33,9 +33,9 @@ and iso =
   | App of { omega_1 : iso; omega_2 : iso }
   | Invert of iso
 
-type gamma =
+type idem =
   | Direct of { params : value; body : term }
-  | Composed of { omega : iso; gamma : gamma }
+  | Composed of { omega : iso; gamma : idem }
   | Var of string
 
 and term =
@@ -47,8 +47,8 @@ and term =
   | App of { omega : iso; t : term }
   | Let of { p : value; t_1 : term; t_2 : term }
   | LetIso of { phi : string; omega : iso; t : term }
-  | AppGamma of { gamma : gamma; t : term }
-  | LetIdem of { phi : string; gamma : gamma; t : term }
+  | AppGamma of { gamma : idem; t : term }
+  | LetIdem of { phi : string; gamma : idem; t : term }
   | Fun of { x : string; body : term }
   | AppFun of { f : term; t : term }
 
@@ -400,11 +400,11 @@ let show_pairs_lhs (v : value) (pairs : (value * expr) list) : string =
     (fun acc (v, _) -> acc ^ "\n  | " ^ show_value v ^ " <-> ...")
     init pairs
 
-let rec show_gamma : gamma -> string = function
+let rec show_idem : idem -> string = function
   | Direct { params; body } ->
       show_value params ^ " -> " ^ show_term body
   | Composed { omega; gamma } ->
-      show_iso omega ^ " with " ^ show_gamma gamma
+      show_iso omega ^ " with " ^ show_idem gamma
   | Var x -> x
 
 and show_term : term -> string = function
@@ -481,11 +481,11 @@ and show_term : term -> string = function
   | LetIso { phi; omega; t } ->
       "let iso " ^ phi ^ " = " ^ show_iso omega ^ "\nin\n\n" ^ show_term t
   | AppGamma { gamma; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _ | Fun _ | AppFun _) as t } ->
-      "{" ^ show_gamma gamma ^ "} (" ^ show_term t ^ ")"
+      "{" ^ show_idem gamma ^ "} (" ^ show_term t ^ ")"
   | AppGamma { gamma; t } ->
-      "{" ^ show_gamma gamma ^ "} " ^ show_term t
+      "{" ^ show_idem gamma ^ "} " ^ show_term t
   | LetIdem { phi; gamma; t } ->
-      "let idem " ^ phi ^ " = " ^ show_gamma gamma ^ "\nin\n\n" ^ show_term t
+      "let idem " ^ phi ^ " = " ^ show_idem gamma ^ "\nin\n\n" ^ show_term t
   | Fun { x; body } ->
       "fun " ^ x ^ " -> " ^ show_term body
   | AppFun { f; t } ->
@@ -543,19 +543,19 @@ let rec free_vars_term : term -> StrSet.t = function
       StrSet.union (free_vars_term t_1) (StrSet.diff (free_vars_term t_2) bound)
   | LetIso { t; _ } -> free_vars_term t
   | AppGamma { gamma; t } ->
-      StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
+      StrSet.union (free_vars_in_idem gamma) (free_vars_term t)
   | LetIdem { gamma; t; _ } ->
-      StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
+      StrSet.union (free_vars_in_idem gamma) (free_vars_term t)
   | Fun { x; body } ->
       StrSet.remove x (free_vars_term body)
   | AppFun { f; t } ->
       StrSet.union (free_vars_term f) (free_vars_term t)
 
-and free_vars_in_gamma : gamma -> StrSet.t = function
+and free_vars_in_idem : idem -> StrSet.t = function
   | Direct { params; body } ->
       let bound = collect_vars params |> StrSet.of_list in
       StrSet.diff (free_vars_term body) bound
-  | Composed { gamma; _ } -> free_vars_in_gamma gamma
+  | Composed { gamma; _ } -> free_vars_in_idem gamma
   | Var _ -> StrSet.empty
 
 let new_generator () : generator = { i = 0 }
@@ -619,14 +619,14 @@ let rec rewrite_app_to_appgamma (phi : string) (t : term) : term =
       if phi2 = phi then LetIso { phi = phi2; omega; t }
       else LetIso { phi = phi2; omega; t = rewrite_app_to_appgamma phi t }
   | LetIdem { phi = phi2; gamma; t } ->
-      let gamma' = rewrite_app_to_appgamma_in_gamma phi gamma in
+      let gamma' = rewrite_app_to_appgamma_in_idem phi gamma in
       if phi2 = phi then LetIdem { phi = phi2; gamma = gamma'; t }
       else LetIdem { phi = phi2; gamma = gamma';
                      t = rewrite_app_to_appgamma phi t }
   | Tuple ts -> Tuple (List.map (rewrite_app_to_appgamma phi) ts)
   | Cted { c; t = arg } -> Cted { c; t = rewrite_app_to_appgamma phi arg }
   | AppGamma { gamma; t = arg } ->
-      AppGamma { gamma = rewrite_app_to_appgamma_in_gamma phi gamma;
+      AppGamma { gamma = rewrite_app_to_appgamma_in_idem phi gamma;
                  t = rewrite_app_to_appgamma phi arg }
   | Fun { x; body } ->
       Fun { x; body = rewrite_app_to_appgamma phi body }
@@ -635,12 +635,12 @@ let rec rewrite_app_to_appgamma (phi : string) (t : term) : term =
                t = rewrite_app_to_appgamma phi arg }
   | Unit | Var _ | Ctor _ -> t
 
-and rewrite_app_to_appgamma_in_gamma (phi : string) (g : gamma) : gamma =
+and rewrite_app_to_appgamma_in_idem (phi : string) (g : idem) : idem =
   match g with
   | Direct { params; body } ->
       Direct { params; body = rewrite_app_to_appgamma phi body }
   | Composed { omega; gamma } ->
-      Composed { omega; gamma = rewrite_app_to_appgamma_in_gamma phi gamma }
+      Composed { omega; gamma = rewrite_app_to_appgamma_in_idem phi gamma }
   | Var _ -> g
 
 let rec rewrite_app_to_appfun (name : string) (t : term) : term =
@@ -658,14 +658,14 @@ let rec rewrite_app_to_appfun (name : string) (t : term) : term =
       if phi = name then LetIso { phi; omega; t }
       else LetIso { phi; omega; t = rewrite_app_to_appfun name t }
   | LetIdem { phi; gamma; t } ->
-      let gamma' = rewrite_app_to_appfun_in_gamma name gamma in
+      let gamma' = rewrite_app_to_appfun_in_idem name gamma in
       if phi = name then LetIdem { phi; gamma = gamma'; t }
       else LetIdem { phi; gamma = gamma';
                      t = rewrite_app_to_appfun name t }
   | Tuple ts -> Tuple (List.map (rewrite_app_to_appfun name) ts)
   | Cted { c; t = arg } -> Cted { c; t = rewrite_app_to_appfun name arg }
   | AppGamma { gamma; t = arg } ->
-      AppGamma { gamma = rewrite_app_to_appfun_in_gamma name gamma;
+      AppGamma { gamma = rewrite_app_to_appfun_in_idem name gamma;
                  t = rewrite_app_to_appfun name arg }
   | Fun { x; body } ->
       if x = name then Fun { x; body }
@@ -675,10 +675,10 @@ let rec rewrite_app_to_appfun (name : string) (t : term) : term =
                t = rewrite_app_to_appfun name arg }
   | Unit | Var _ | Ctor _ -> t
 
-and rewrite_app_to_appfun_in_gamma (name : string) (g : gamma) : gamma =
+and rewrite_app_to_appfun_in_idem (name : string) (g : idem) : idem =
   match g with
   | Direct { params; body } ->
       Direct { params; body = rewrite_app_to_appfun name body }
   | Composed { omega; gamma } ->
-      Composed { omega; gamma = rewrite_app_to_appfun_in_gamma name gamma }
+      Composed { omega; gamma = rewrite_app_to_appfun_in_idem name gamma }
   | Var _ -> g

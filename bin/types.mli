@@ -33,9 +33,9 @@ and iso =
   | App of { omega_1 : iso; omega_2 : iso }
   | Invert of iso
 
-type gamma =
+type idem =
   | Direct of { params : value; body : term }
-  | Composed of { omega : iso; gamma : gamma }
+  | Composed of { omega : iso; gamma : idem }
   | Var of string
 
 and term =
@@ -47,8 +47,8 @@ and term =
   | App of { omega : iso; t : term }
   | Let of { p : value; t_1 : term; t_2 : term }
   | LetIso of { phi : string; omega : iso; t : term }
-  | AppGamma of { gamma : gamma; t : term }
-  | LetIdem of { phi : string; gamma : gamma; t : term }
+  | AppGamma of { gamma : idem; t : term }
+  | LetIdem of { phi : string; gamma : idem; t : term }
   | Fun of { x : string; body : term }
   | AppFun of { f : term; t : term }
 
@@ -85,7 +85,7 @@ val show_expr : expr -> string
 val show_pairs : (value * expr) list -> string
 val show_iso : iso -> string
 val show_pairs_lhs : value -> (value * expr) list -> string
-val show_gamma : gamma -> string
+val show_idem : idem -> string
 val show_term : term -> string
 val nat_of_int : int -> value
 val char_to_char_ctor : char -> string
@@ -94,12 +94,12 @@ val string_literal_to_value : string -> value
 val build_storage : 'a -> value -> 'a option StrMap.t
 val collect_vars : value -> string list
 val free_vars_term : term -> StrSet.t
-val free_vars_in_gamma : gamma -> StrSet.t
+val free_vars_in_idem : idem -> StrSet.t
 val new_generator : unit -> generator
 val fresh : generator -> int
 val expand : generator -> term -> ((value * iso * value) list * value) myresult
 val expand_expr : generator -> expr_intermediate -> expr myresult
 val rewrite_app_to_appgamma : string -> term -> term
-val rewrite_app_to_appgamma_in_gamma : string -> gamma -> gamma
+val rewrite_app_to_appgamma_in_idem : string -> idem -> idem
 val rewrite_app_to_appfun : string -> term -> term
-val rewrite_app_to_appfun_in_gamma : string -> gamma -> gamma
+val rewrite_app_to_appfun_in_idem : string -> idem -> idem

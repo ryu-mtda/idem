@@ -18,7 +18,7 @@
 %type <expr> expr
 %type <value * expr> biarrowed
 %type <iso> iso_grouped iso_almost iso
-%type <gamma> gamma
+%type <idem> idem
 %type <term> term_grouped term_almost term term_nonlet
 %%
 
@@ -111,13 +111,13 @@ iso:
   | FIX; phi = VAR; ARROW; omega = iso; { Fix { phi; omega } }
   | FUN; params = VAR+; ARROW; omega = iso; { lambdas_of_params params omega }
 
-gamma:
+idem:
   | params = value; ARROW; body = term;
     { Direct { params; body } }
-  | omega = iso_almost; WITH; g = gamma;
+  | omega = iso_almost; WITH; g = idem;
     { Composed { omega; gamma = g } }
   | x = VAR;
-    { let lmao : gamma = Var x in lmao }
+    { let lmao : idem = Var x in lmao }
 
 term_grouped:
   | LPAREN; t = term; RPAREN; { t }
@@ -165,7 +165,7 @@ term:
       LetIso { phi; omega = Fix { phi; omega }; t }
     }
 
-  | IDEM; phi = VAR; EQUAL; g = gamma; IN; t = term;
+  | IDEM; phi = VAR; EQUAL; g = idem; IN; t = term;
     { LetIdem { phi; gamma = g; t = rewrite_app_to_appgamma phi t } }
 
 term_nonlet:

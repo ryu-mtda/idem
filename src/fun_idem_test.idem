@@ -26,4 +26,5 @@ idem h = (x, y) -> (
 )
 in
 
-f (3, 5)
+let (x, y) = f (3, 5) in
+f (x, y)
