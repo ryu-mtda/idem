@@ -10,6 +10,7 @@ type any =
   | Ctor of any list * string
   | Inverted of any
   | Idem of any
+  | FunArrow of { a : any; b : any }
 
 type equation = any * any
 type subst = { what : int; into : any }
@@ -26,6 +27,7 @@ let rec subst (s : subst) : any -> any = function
   | Ctor (l, x) -> Ctor (List.map (subst s) l, x)
   | Inverted a -> Inverted (subst s a)
   | Idem a -> Idem (subst s a)
+  | FunArrow { a; b } -> FunArrow { a = subst s a; b = subst s b }
   | otherwise -> otherwise
 
 let tvar_map (a : any list) : (int * int) list =
@@ -40,7 +42,7 @@ let tvar_map (a : any list) : (int * int) list =
   let rec collect = function
     | Unit | Named _ -> ()
     | Product l | Ctor (l, _) -> List.iter collect l
-    | BiArrow { a; b } | Arrow { a; b } ->
+    | BiArrow { a; b } | Arrow { a; b } | FunArrow { a; b } ->
         collect a;
         collect b
     | Var i -> get i
@@ -60,6 +62,7 @@ let rec invert_iso_type : any -> any myresult = function
   | Inverted a -> Ok a
   | Var x -> Ok (Inverted (Var x))
   | Idem _ -> Error "idem type cannot be inverted"
+  | FunArrow _ -> Error "function type cannot be inverted"
   | otherwise -> Error (show_any [] otherwise ^ " is not an iso type")
 
 and normalize_inv : any -> any myresult = function
@@ -71,6 +74,7 @@ and normalize_inv : any -> any myresult = function
   | Inverted a -> invert_iso_type a
   | Var x -> Ok (Var x)
   | Idem a -> Ok (Idem a)
+  | FunArrow _ -> Error "function type is not an iso type"
   | otherwise -> Error (show_any [] otherwise ^ " is not an iso type")
 
 and base_of_any : any -> Types.base_type myresult = function
@@ -84,6 +88,10 @@ and base_of_any : any -> Types.base_type myresult = function
       let++ l = List.map base_of_any l |> bind_all in
       let lmao : Types.base_type = Types.Ctor (l, x) in
       lmao
+  | FunArrow { a; b } ->
+      let** a = base_of_any a in
+      let++ b = base_of_any b in
+      Types.FunType { a; b }
   | _ -> Error "base type is expected"
 
 and iso_of_any : any -> Types.iso_type myresult = function
@@ -155,7 +163,7 @@ let instantiate (gen : Types.generator) : elt -> any = function
 
 let rec occurs (x : int) : any -> bool = function
   | Product l | Ctor (l, _) -> List.exists (occurs x) l
-  | BiArrow { a; b } | Arrow { a; b } -> occurs x a || occurs x b
+  | BiArrow { a; b } | Arrow { a; b } | FunArrow { a; b } -> occurs x a || occurs x b
   | Var y -> x = y
   | Inverted a -> occurs x a
   | Idem a -> occurs x a
@@ -197,6 +205,8 @@ let rec unify : equation list -> subst list myresult = function
         when x_1 = x_2 && List.compare_lengths l_1 l_2 = 0 ->
           List.combine l_1 l_2 @ e' |> unify
       | Idem a1, Idem a2 -> (a1, a2) :: e' |> unify
+      | FunArrow { a = a_1; b = b_1 }, FunArrow { a = a_2; b = b_2 } ->
+          (a_1, a_2) :: (b_1, b_2) :: e' |> unify
       | a, b ->
           let map = tvar_map [ a; b ] in
           Error ("unable to unify " ^ show_any map a ^ " and " ^ show_any map b)
@@ -215,7 +225,7 @@ let find_generalizable (a : any) (ctx : context) : int list =
         List.fold_left
           (fun acc a -> find_in_any a |> IntSet.union acc)
           IntSet.empty l
-    | BiArrow { a; b } | Arrow { a; b } ->
+    | BiArrow { a; b } | Arrow { a; b } | FunArrow { a; b } ->
         IntSet.union (find_in_any a) (find_in_any b)
     | Var x -> IntSet.singleton x
     | Inverted a -> find_in_any a
@@ -396,6 +406,16 @@ and infer_term (t : Types.term) (gen : Types.generator) (ctx : context) :
       let** ctx = generalize_idem e_g ctx phi a_g in
       let++ { a = a_t; e = e_t } = infer_term t gen ctx in
       { a = a_t; e = e_g @ e_t }
+  | Fun { x; body } ->
+      let fresh = Var (Types.fresh gen) in
+      let ctx = StrMap.add x (Mono fresh) ctx in
+      let++ { a = a_body; e } = infer_term body gen ctx in
+      { a = FunArrow { a = fresh; b = a_body }; e }
+  | AppFun { f; t } ->
+      let** { a = a_f; e = e_f } = infer_term f gen ctx in
+      let++ { a = a_t; e = e_t } = infer_term t gen ctx in
+      let fresh = Var (Types.fresh gen) in
+      { a = fresh; e = (a_f, FunArrow { a = a_t; b = fresh }) :: e_f @ e_t }
 
 and check_direct_idempotency (params : Types.value) (body : Types.term) :
     unit myresult =
@@ -575,6 +595,10 @@ let rec any_of_base ~(var_map : int StrMap.t) ~(arity_map : int StrMap.t) :
         Error
           (x ^ " expects arity of " ^ string_of_int arity_actual
          ^ " but provided with " ^ string_of_int arity_found)
+  | FunType { a; b } ->
+      let** a = any_of_base ~var_map ~arity_map a in
+      let++ b = any_of_base ~var_map ~arity_map b in
+      FunArrow { a; b }
 
 let arity_map (defs : Types.typedef list) : int StrMap.t =
   List.fold_left

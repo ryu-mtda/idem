@@ -6,6 +6,7 @@ type base_type =
   | Named of string
   | Var of string
   | Ctor of base_type list * string
+  | FunType of { a : base_type; b : base_type }
 
 type iso_type =
   | BiArrow of { a : base_type; b : base_type }
@@ -48,6 +49,8 @@ and term =
   | LetIso of { phi : string; omega : iso; t : term }
   | AppGamma of { gamma : gamma; t : term }
   | LetIdem of { phi : string; gamma : gamma; t : term }
+  | Fun of { x : string; body : term }
+  | AppFun of { f : term; t : term }
 
 type expr_intermediate =
   | IValue of term
@@ -202,6 +205,10 @@ let rec lambdas_of_params : string list -> iso -> iso = function
   | [] -> fun omega -> omega
   | psi :: tl -> fun omega -> Lambda { psi; omega = lambdas_of_params tl omega }
 
+let rec funs_of_params : string list -> term -> term = function
+  | [] -> fun body -> body
+  | x :: tl -> fun body -> Fun { x; body = funs_of_params tl body }
+
 let rec is_list_value : value -> bool = function
   | Cted { c = "Cons"; v = Tuple [ _; v ] } -> is_list_value v
   | Ctor "Nil" -> true
@@ -253,6 +260,7 @@ let rec show_base_type : base_type -> string = function
   | Product l ->
       let lmao = function
         | Product l -> "(" ^ show_base_type (Product l) ^ ")"
+        | FunType _ as f -> "(" ^ show_base_type f ^ ")"
         | otherwise -> show_base_type otherwise
       in
       show_listlike lmao ~left:"" ~delim:" * " ~right:"" l
@@ -261,6 +269,12 @@ let rec show_base_type : base_type -> string = function
   | Ctor ([ (Product _ as x) ], a) -> "(" ^ show_base_type x ^ ") " ^ a
   | Ctor ([ x ], a) -> show_base_type x ^ " " ^ a
   | Ctor (l, a) -> show_tuple show_base_type l ^ " " ^ a
+  | FunType { a; b } ->
+      let lhs = match a with
+        | Product _ | FunType _ -> "(" ^ show_base_type a ^ ")"
+        | _ -> show_base_type a
+      in
+      lhs ^ " -> " ^ show_base_type b
 
 let rec show_iso_type : iso_type -> string = function
   | BiArrow { a; b } -> show_base_type a ^ " <-> " ^ show_base_type b
@@ -443,7 +457,7 @@ and show_term : term -> string = function
         in
         show_term t_1 ^ lmao t_2
   | Cted { c; t } when is_int_term t || is_list_term t -> c ^ " " ^ show_term t
-  | Cted { c; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
+  | Cted { c; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _ | Fun _ | AppFun _) as t } ->
       c ^ " (" ^ show_term t ^ ")"
   | Cted { c; t } -> c ^ " " ^ show_term t
   | App { omega = (Pairs _ | Fix _ | Lambda _) as omega; t }
@@ -452,26 +466,30 @@ and show_term : term -> string = function
   | App
       {
         omega = (Pairs _ | Fix _ | Lambda _) as omega;
-        t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t;
+        t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _ | Fun _ | AppFun _) as t;
       } ->
       "{" ^ show_iso omega ^ "} (" ^ show_term t ^ ")"
   | App { omega = (Pairs _ | Fix _ | Lambda _) as omega; t } ->
       "{" ^ show_iso omega ^ "} " ^ show_term t
   | App { omega; t } when is_int_term t || is_list_term t ->
       show_iso omega ^ " " ^ show_term t
-  | App { omega; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
+  | App { omega; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _ | Fun _ | AppFun _) as t } ->
       show_iso omega ^ " (" ^ show_term t ^ ")"
   | App { omega; t } -> show_iso omega ^ " " ^ show_term t
   | Let { p; t_1; t_2 } ->
       "let " ^ show_value p ^ " = " ^ show_term t_1 ^ "\nin\n\n" ^ show_term t_2
   | LetIso { phi; omega; t } ->
       "let iso " ^ phi ^ " = " ^ show_iso omega ^ "\nin\n\n" ^ show_term t
-  | AppGamma { gamma; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
+  | AppGamma { gamma; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _ | Fun _ | AppFun _) as t } ->
       "{" ^ show_gamma gamma ^ "} (" ^ show_term t ^ ")"
   | AppGamma { gamma; t } ->
       "{" ^ show_gamma gamma ^ "} " ^ show_term t
   | LetIdem { phi; gamma; t } ->
       "let idem " ^ phi ^ " = " ^ show_gamma gamma ^ "\nin\n\n" ^ show_term t
+  | Fun { x; body } ->
+      "fun " ^ x ^ " -> " ^ show_term body
+  | AppFun { f; t } ->
+      show_term f ^ " " ^ show_term t
 
 let rec nat_of_int (n : int) : value =
   if n < 1 then Ctor "Z" else Cted { c = "S"; v = nat_of_int (n - 1) }
@@ -528,6 +546,10 @@ let rec free_vars_term : term -> StrSet.t = function
       StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
   | LetIdem { gamma; t; _ } ->
       StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
+  | Fun { x; body } ->
+      StrSet.remove x (free_vars_term body)
+  | AppFun { f; t } ->
+      StrSet.union (free_vars_term f) (free_vars_term t)
 
 and free_vars_in_gamma : gamma -> StrSet.t = function
   | Direct { params; body } ->
@@ -565,6 +587,8 @@ let rec expand (gen : generator) :
   | LetIso _ -> Error "nested iso binding is not supported (yet)"
   | AppGamma _ -> Error "nested idem application is not supported (yet)"
   | LetIdem _ -> Error "nested idem binding is not supported (yet)"
+  | Fun _ -> Error "function in iso body is not supported"
+  | AppFun _ -> Error "function application in iso body is not supported"
 
 let rec expand_expr (gen : generator) : expr_intermediate -> expr myresult =
   function
@@ -604,6 +628,11 @@ let rec rewrite_app_to_appgamma (phi : string) (t : term) : term =
   | AppGamma { gamma; t = arg } ->
       AppGamma { gamma = rewrite_app_to_appgamma_in_gamma phi gamma;
                  t = rewrite_app_to_appgamma phi arg }
+  | Fun { x; body } ->
+      Fun { x; body = rewrite_app_to_appgamma phi body }
+  | AppFun { f; t = arg } ->
+      AppFun { f = rewrite_app_to_appgamma phi f;
+               t = rewrite_app_to_appgamma phi arg }
   | Unit | Var _ | Ctor _ -> t
 
 and rewrite_app_to_appgamma_in_gamma (phi : string) (g : gamma) : gamma =
@@ -612,4 +641,44 @@ and rewrite_app_to_appgamma_in_gamma (phi : string) (g : gamma) : gamma =
       Direct { params; body = rewrite_app_to_appgamma phi body }
   | Composed { omega; gamma } ->
       Composed { omega; gamma = rewrite_app_to_appgamma_in_gamma phi gamma }
+  | Var _ -> g
+
+let rec rewrite_app_to_appfun (name : string) (t : term) : term =
+  match t with
+  | App { omega = Var x; t = arg } when x = name ->
+      AppFun { f = Var x; t = rewrite_app_to_appfun name arg }
+  | App { omega; t = arg } ->
+      App { omega; t = rewrite_app_to_appfun name arg }
+  | Let { p; t_1; t_2 } ->
+      let t_1' = rewrite_app_to_appfun name t_1 in
+      let shadowed = contains_value name p in
+      Let { p; t_1 = t_1';
+            t_2 = if shadowed then t_2 else rewrite_app_to_appfun name t_2 }
+  | LetIso { phi; omega; t } ->
+      if phi = name then LetIso { phi; omega; t }
+      else LetIso { phi; omega; t = rewrite_app_to_appfun name t }
+  | LetIdem { phi; gamma; t } ->
+      let gamma' = rewrite_app_to_appfun_in_gamma name gamma in
+      if phi = name then LetIdem { phi; gamma = gamma'; t }
+      else LetIdem { phi; gamma = gamma';
+                     t = rewrite_app_to_appfun name t }
+  | Tuple ts -> Tuple (List.map (rewrite_app_to_appfun name) ts)
+  | Cted { c; t = arg } -> Cted { c; t = rewrite_app_to_appfun name arg }
+  | AppGamma { gamma; t = arg } ->
+      AppGamma { gamma = rewrite_app_to_appfun_in_gamma name gamma;
+                 t = rewrite_app_to_appfun name arg }
+  | Fun { x; body } ->
+      if x = name then Fun { x; body }
+      else Fun { x; body = rewrite_app_to_appfun name body }
+  | AppFun { f; t = arg } ->
+      AppFun { f = rewrite_app_to_appfun name f;
+               t = rewrite_app_to_appfun name arg }
+  | Unit | Var _ | Ctor _ -> t
+
+and rewrite_app_to_appfun_in_gamma (name : string) (g : gamma) : gamma =
+  match g with
+  | Direct { params; body } ->
+      Direct { params; body = rewrite_app_to_appfun name body }
+  | Composed { omega; gamma } ->
+      Composed { omega; gamma = rewrite_app_to_appfun_in_gamma name gamma }
   | Var _ -> g

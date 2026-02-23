@@ -76,6 +76,10 @@ and subst ~(from : string) ~(into : term) ~(what : term) : term =
   | LetIdem { phi; gamma; t } ->
       LetIdem { phi; gamma = subst_in_gamma ~from ~into ~what:gamma;
                 t = if phi = from then t else subst t }
+  | Fun { x; body } when x <> from ->
+      Fun { x; body = subst body }
+  | AppFun { f; t } ->
+      AppFun { f = subst f; t = subst t }
   | _ -> what
 
 let rec subst_iso ~(from : string) ~(into : iso) ~(what : iso) : iso =
@@ -142,6 +146,10 @@ and subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
   | LetIdem { phi; gamma; t } ->
       LetIdem { phi; gamma = subst_iso_in_gamma ~from ~into ~what:gamma;
                 t = subst_iso_in_term t }
+  | Fun { x; body } ->
+      Fun { x; body = subst_iso_in_term body }
+  | AppFun { f; t } ->
+      AppFun { f = subst_iso_in_term f; t = subst_iso_in_term t }
   | _ -> what
 
 let rec value_of_term (t : term) : value myresult =
@@ -204,6 +212,10 @@ and subst_gamma_in_term ~(from : string) ~(into : gamma) ~(what : term) : term =
   | LetIdem { phi; gamma; t } ->
       LetIdem { phi; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma;
                 t = subst t }
+  | Fun { x; body } ->
+      Fun { x; body = subst body }
+  | AppFun { f; t } ->
+      AppFun { f = subst f; t = subst t }
   | _ -> what
 
 let rec eval (t : term) : term myresult =
@@ -232,14 +244,19 @@ let rec eval (t : term) : term myresult =
       | _ -> Ok t
     end
   | Let { p; t_1; t_2 } -> begin
-      let** t_1 = Result.bind (eval t_1) value_of_term in
-      if matches p t_1 then
-        let** unified = unify_value p t_1 in
-        List.fold_left
-          (fun t (from, into) -> subst ~from ~into:(term_of_value into) ~what:t)
-          t_2 unified
-        |> eval
-      else Error ("unable to unify " ^ show_value p ^ " and " ^ show_value t_1)
+      let** t_1_evaled = eval t_1 in
+      match p, t_1_evaled with
+      | Var name, Fun _ ->
+          subst ~from:name ~into:t_1_evaled ~what:t_2 |> eval
+      | _ ->
+          let** t_1_val = value_of_term t_1_evaled in
+          if matches p t_1_val then
+            let** unified = unify_value p t_1_val in
+            List.fold_left
+              (fun t (from, into) -> subst ~from ~into:(term_of_value into) ~what:t)
+              t_2 unified
+            |> eval
+          else Error ("unable to unify " ^ show_value p ^ " and " ^ show_value t_1_val)
     end
   | LetIso { phi; omega; t } ->
       let omega = eval_iso omega in
@@ -263,6 +280,15 @@ let rec eval (t : term) : term myresult =
   | LetIdem { phi; gamma; t } ->
       let g = eval_gamma gamma in
       subst_gamma_in_term ~from:phi ~into:g ~what:t |> eval
+  | Fun _ -> Ok t
+  | AppFun { f; t = arg } -> begin
+      let** f' = eval f in
+      let** arg' = eval arg in
+      match f' with
+      | Fun { x; body } ->
+          subst ~from:x ~into:arg' ~what:body |> eval
+      | _ -> Error ("expected a function, got: " ^ show_term f')
+    end
   | _ -> Ok t
 
 and eval_gamma (g : gamma) : gamma =

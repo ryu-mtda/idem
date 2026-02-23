@@ -143,7 +143,16 @@ term_almost:
 term:
   | t = term_almost; { t }
   | t_1 = term_almost; CONS; t_2 = term; { Cted { c = "Cons"; t = Tuple [t_1; t_2] } }
-  | LET; p = value; EQUAL; t_1 = term; IN; t_2 = term; { Let { p; t_1; t_2 } }
+  | LET; p = value; EQUAL; t_1 = term; IN; t_2 = term;
+    {
+      let t_2 = match (p : value), t_1 with
+        | Var name, Fun _ -> rewrite_app_to_appfun name t_2
+        | _ -> t_2
+      in
+      Let { p; t_1; t_2 }
+    }
+  | FUN; params = VAR+; ARROW; body = term;
+    { funs_of_params params body }
   | ISO; phi = VAR; params = VAR*; EQUAL; omega = iso; IN; t = term;
     { LetIso { phi; omega = lambdas_of_params params omega; t } }
 

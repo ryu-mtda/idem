@@ -6,6 +6,7 @@ type base_type =
   | Named of string
   | Var of string
   | Ctor of base_type list * string
+  | FunType of { a : base_type; b : base_type }
 
 type iso_type =
   | BiArrow of { a : base_type; b : base_type }
@@ -48,6 +49,8 @@ and term =
   | LetIso of { phi : string; omega : iso; t : term }
   | AppGamma of { gamma : gamma; t : term }
   | LetIdem of { phi : string; gamma : gamma; t : term }
+  | Fun of { x : string; body : term }
+  | AppFun of { f : term; t : term }
 
 type expr_intermediate =
   | IValue of term
@@ -66,6 +69,7 @@ val value_of_expr : expr -> value
 val contains_value : string -> value -> bool
 val contains_pairs : string -> (value * expr) list -> bool
 val lambdas_of_params : string list -> iso -> iso
+val funs_of_params : string list -> term -> term
 val is_list_value : value -> bool
 val is_list_term : term -> bool
 val is_int_value : value -> bool
@@ -97,3 +101,5 @@ val expand : generator -> term -> ((value * iso * value) list * value) myresult
 val expand_expr : generator -> expr_intermediate -> expr myresult
 val rewrite_app_to_appgamma : string -> term -> term
 val rewrite_app_to_appgamma_in_gamma : string -> gamma -> gamma
+val rewrite_app_to_appfun : string -> term -> term
+val rewrite_app_to_appfun_in_gamma : string -> gamma -> gamma

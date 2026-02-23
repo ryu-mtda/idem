@@ -1,0 +1,11 @@
+type nat = Z | S of nat
+
+iso rec add = case
+| (m, Z) <-> (m, Z)
+| (m, S n) <-> let (m, n) = add (S m, n) in (m, S n)
+in
+
+let g = fun x -> let (y, z) = add (x, x) in y
+in
+
+g 3
