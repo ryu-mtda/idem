@@ -23,8 +23,8 @@ idem f = omega with gamma
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/ryu-mtda/idem-claude.git
-    cd idem-claude
+    git clone https://github.com/ryu-mtda/idem.git
+    cd idem
     ```
 
 2.  Build the project using Dune:
