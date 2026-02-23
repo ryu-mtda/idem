@@ -32,7 +32,12 @@ and iso =
   | App of { omega_1 : iso; omega_2 : iso }
   | Invert of iso
 
-type term =
+type gamma =
+  | Direct of { params : value; body : term }
+  | Composed of { omega : iso; gamma : gamma }
+  | Var of string
+
+and term =
   | Unit
   | Var of string
   | Ctor of string
@@ -41,6 +46,8 @@ type term =
   | App of { omega : iso; t : term }
   | Let of { p : value; t_1 : term; t_2 : term }
   | LetIso of { phi : string; omega : iso; t : term }
+  | AppGamma of { gamma : gamma; t : term }
+  | LetIdem of { phi : string; gamma : gamma; t : term }
 
 type expr_intermediate =
   | IValue of term
@@ -379,7 +386,14 @@ let show_pairs_lhs (v : value) (pairs : (value * expr) list) : string =
     (fun acc (v, _) -> acc ^ "\n  | " ^ show_value v ^ " <-> ...")
     init pairs
 
-let rec show_term : term -> string = function
+let rec show_gamma : gamma -> string = function
+  | Direct { params; body } ->
+      show_value params ^ " -> " ^ show_term body
+  | Composed { omega; gamma } ->
+      show_iso omega ^ " with " ^ show_gamma gamma
+  | Var x -> x
+
+and show_term : term -> string = function
   | Unit -> "()"
   | Ctor "Z" -> "0"
   | Ctor "Nil" -> "[]"
@@ -429,7 +443,7 @@ let rec show_term : term -> string = function
         in
         show_term t_1 ^ lmao t_2
   | Cted { c; t } when is_int_term t || is_list_term t -> c ^ " " ^ show_term t
-  | Cted { c; t = (Cted _ | App _ | Let _ | LetIso _) as t } ->
+  | Cted { c; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
       c ^ " (" ^ show_term t ^ ")"
   | Cted { c; t } -> c ^ " " ^ show_term t
   | App { omega = (Pairs _ | Fix _ | Lambda _) as omega; t }
@@ -438,20 +452,26 @@ let rec show_term : term -> string = function
   | App
       {
         omega = (Pairs _ | Fix _ | Lambda _) as omega;
-        t = (Cted _ | App _ | Let _ | LetIso _) as t;
+        t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t;
       } ->
       "{" ^ show_iso omega ^ "} (" ^ show_term t ^ ")"
   | App { omega = (Pairs _ | Fix _ | Lambda _) as omega; t } ->
       "{" ^ show_iso omega ^ "} " ^ show_term t
   | App { omega; t } when is_int_term t || is_list_term t ->
       show_iso omega ^ " " ^ show_term t
-  | App { omega; t = (Cted _ | App _ | Let _ | LetIso _) as t } ->
+  | App { omega; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
       show_iso omega ^ " (" ^ show_term t ^ ")"
   | App { omega; t } -> show_iso omega ^ " " ^ show_term t
   | Let { p; t_1; t_2 } ->
       "let " ^ show_value p ^ " = " ^ show_term t_1 ^ "\nin\n\n" ^ show_term t_2
   | LetIso { phi; omega; t } ->
       "let iso " ^ phi ^ " = " ^ show_iso omega ^ "\nin\n\n" ^ show_term t
+  | AppGamma { gamma; t = (Cted _ | App _ | Let _ | LetIso _ | AppGamma _ | LetIdem _) as t } ->
+      "{" ^ show_gamma gamma ^ "} (" ^ show_term t ^ ")"
+  | AppGamma { gamma; t } ->
+      "{" ^ show_gamma gamma ^ "} " ^ show_term t
+  | LetIdem { phi; gamma; t } ->
+      "let idem " ^ phi ^ " = " ^ show_gamma gamma ^ "\nin\n\n" ^ show_term t
 
 let rec nat_of_int (n : int) : value =
   if n < 1 then Ctor "Z" else Cted { c = "S"; v = nat_of_int (n - 1) }
@@ -493,6 +513,29 @@ let collect_vars (v : value) : string list =
   in
   collect v |> List.sort_uniq compare
 
+let rec free_vars_term : term -> StrSet.t = function
+  | Unit | Ctor _ -> StrSet.empty
+  | Var x -> StrSet.singleton x
+  | Cted { t; _ } -> free_vars_term t
+  | Tuple ts ->
+      List.fold_left (fun acc t -> StrSet.union acc (free_vars_term t)) StrSet.empty ts
+  | App { t; _ } -> free_vars_term t
+  | Let { p; t_1; t_2 } ->
+      let bound = collect_vars p |> StrSet.of_list in
+      StrSet.union (free_vars_term t_1) (StrSet.diff (free_vars_term t_2) bound)
+  | LetIso { t; _ } -> free_vars_term t
+  | AppGamma { gamma; t } ->
+      StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
+  | LetIdem { gamma; t; _ } ->
+      StrSet.union (free_vars_in_gamma gamma) (free_vars_term t)
+
+and free_vars_in_gamma : gamma -> StrSet.t = function
+  | Direct { params; body } ->
+      let bound = collect_vars params |> StrSet.of_list in
+      StrSet.diff (free_vars_term body) bound
+  | Composed { gamma; _ } -> free_vars_in_gamma gamma
+  | Var _ -> StrSet.empty
+
 let new_generator () : generator = { i = 0 }
 
 let fresh (gen : generator) : int =
@@ -520,6 +563,8 @@ let rec expand (gen : generator) :
       ((name, omega, v) :: l, name)
   | Let _ -> Error "nested let is not supported (yet)"
   | LetIso _ -> Error "nested iso binding is not supported (yet)"
+  | AppGamma _ -> Error "nested idem application is not supported (yet)"
+  | LetIdem _ -> Error "nested idem binding is not supported (yet)"
 
 let rec expand_expr (gen : generator) : expr_intermediate -> expr myresult =
   function
@@ -536,3 +581,35 @@ let rec expand_expr (gen : generator) : expr_intermediate -> expr myresult =
       List.fold_left
         (fun e (p_1, omega, p_2) : expr -> Let { p_1; omega; p_2; e })
         init l
+
+let rec rewrite_app_to_appgamma (phi : string) (t : term) : term =
+  match t with
+  | App { omega = Var x; t = arg } when x = phi ->
+      AppGamma { gamma = Var x; t = rewrite_app_to_appgamma phi arg }
+  | App { omega; t = arg } ->
+      App { omega; t = rewrite_app_to_appgamma phi arg }
+  | Let { p; t_1; t_2 } ->
+      Let { p; t_1 = rewrite_app_to_appgamma phi t_1;
+            t_2 = rewrite_app_to_appgamma phi t_2 }
+  | LetIso { phi = phi2; omega; t } ->
+      if phi2 = phi then LetIso { phi = phi2; omega; t }
+      else LetIso { phi = phi2; omega; t = rewrite_app_to_appgamma phi t }
+  | LetIdem { phi = phi2; gamma; t } ->
+      let gamma' = rewrite_app_to_appgamma_in_gamma phi gamma in
+      if phi2 = phi then LetIdem { phi = phi2; gamma = gamma'; t }
+      else LetIdem { phi = phi2; gamma = gamma';
+                     t = rewrite_app_to_appgamma phi t }
+  | Tuple ts -> Tuple (List.map (rewrite_app_to_appgamma phi) ts)
+  | Cted { c; t = arg } -> Cted { c; t = rewrite_app_to_appgamma phi arg }
+  | AppGamma { gamma; t = arg } ->
+      AppGamma { gamma = rewrite_app_to_appgamma_in_gamma phi gamma;
+                 t = rewrite_app_to_appgamma phi arg }
+  | Unit | Var _ | Ctor _ -> t
+
+and rewrite_app_to_appgamma_in_gamma (phi : string) (g : gamma) : gamma =
+  match g with
+  | Direct { params; body } ->
+      Direct { params; body = rewrite_app_to_appgamma phi body }
+  | Composed { omega; gamma } ->
+      Composed { omega; gamma = rewrite_app_to_appgamma_in_gamma phi gamma }
+  | Var _ -> g

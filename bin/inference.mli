@@ -52,6 +52,8 @@ val infer_pair :
   inferred_pair myresult
 
 val infer_term : Types.term -> Types.generator -> context -> inferred myresult
+val infer_gamma : Types.gamma -> Types.generator -> context -> inferred myresult
+val generalize_idem : equation list -> context -> string -> any -> context myresult
 val infer_expr : Types.expr -> Types.generator -> context -> inferred myresult
 val infer_iso : Types.iso -> Types.generator -> context -> inferred myresult
 

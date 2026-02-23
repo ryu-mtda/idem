@@ -3,7 +3,8 @@
 %}
 
 %token EOF LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET TIMES PIPE COMMA SEMICOLON CONS
-  ARROW BIARROW EQUAL UNIT LET IN ISO FIX TYPE INVERT REC OF FUN CASE MATCH WITH
+  ARROW BIARROW EQUAL UNIT LET IN ISO IDEM FIX TYPE INVERT REC OF FUN CASE MATCH WITH
+  AT SLASH
 %token <int> NAT
 %token <char> CHAR
 %token <string> TVAR VAR CTOR STRING
@@ -17,6 +18,7 @@
 %type <expr> expr
 %type <value * expr> biarrowed
 %type <iso> iso_grouped iso_almost iso
+%type <gamma> gamma
 %type <term> term_grouped term_almost term term_nonlet
 %%
 
@@ -109,6 +111,14 @@ iso:
   | FIX; phi = VAR; ARROW; omega = iso; { Fix { phi; omega } }
   | FUN; params = VAR+; ARROW; omega = iso; { lambdas_of_params params omega }
 
+gamma:
+  | params = value; ARROW; body = term;
+    { Direct { params; body } }
+  | omega = iso_almost; WITH; g = gamma;
+    { Composed { omega; gamma = g } }
+  | x = VAR;
+    { let lmao : gamma = Var x in lmao }
+
 term_grouped:
   | LPAREN; t = term; RPAREN; { t }
   | LPAREN; RPAREN; { Unit }
@@ -145,6 +155,9 @@ term:
       let omega = lambdas_of_params params omega in
       LetIso { phi; omega = Fix { phi; omega }; t }
     }
+
+  | IDEM; phi = VAR; EQUAL; g = gamma; IN; t = term;
+    { LetIdem { phi; gamma = g; t = rewrite_app_to_appgamma phi t } }
 
 term_nonlet:
   | t = term_almost; { t }

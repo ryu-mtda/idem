@@ -51,7 +51,15 @@ let rec invert (omega : iso) : iso =
       App { omega_1 = invert omega_1; omega_2 = invert omega_2 }
   | Invert omega -> omega
 
-let rec subst ~(from : string) ~(into : term) ~(what : term) : term =
+let rec subst_in_gamma ~(from : string) ~(into : term) ~(what : gamma) : gamma =
+  match what with
+  | Direct { params; body } when not (contains_value from params) ->
+      Direct { params; body = subst ~from ~into ~what:body }
+  | Composed { omega; gamma } ->
+      Composed { omega; gamma = subst_in_gamma ~from ~into ~what:gamma }
+  | _ -> what
+
+and subst ~(from : string) ~(into : term) ~(what : term) : term =
   let subst what = subst ~from ~into ~what in
   match what with
   | Var x when x = from -> into
@@ -63,6 +71,11 @@ let rec subst ~(from : string) ~(into : term) ~(what : term) : term =
   | Let { p; t_1; t_2 } -> Let { p; t_1 = subst t_1; t_2 = subst t_2 }
   | LetIso { phi; omega; t } when phi <> from ->
       LetIso { phi; omega; t = subst t }
+  | AppGamma { gamma; t } ->
+      AppGamma { gamma = subst_in_gamma ~from ~into ~what:gamma; t = subst t }
+  | LetIdem { phi; gamma; t } ->
+      LetIdem { phi; gamma = subst_in_gamma ~from ~into ~what:gamma;
+                t = if phi = from then t else subst t }
   | _ -> what
 
 let rec subst_iso ~(from : string) ~(into : iso) ~(what : iso) : iso =
@@ -99,7 +112,16 @@ and subst_iso_in_expr ~(from : string) ~(into : iso) ~(what : expr) : expr =
       in
       LetVal { p; v; e }
 
-let rec subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
+let rec subst_iso_in_gamma ~(from : string) ~(into : iso) ~(what : gamma) : gamma =
+  match what with
+  | Direct { params; body } ->
+      Direct { params; body = subst_iso_in_term ~from ~into ~what:body }
+  | Composed { omega; gamma } ->
+      Composed { omega = subst_iso ~from ~into ~what:omega;
+                 gamma = subst_iso_in_gamma ~from ~into ~what:gamma }
+  | Var _ -> what
+
+and subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
   let subst_iso_in_term what = subst_iso_in_term ~from ~into ~what in
   let subst_iso what = subst_iso ~from ~into ~what in
   match what with
@@ -114,6 +136,12 @@ let rec subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
       LetIso { phi; omega = subst_iso omega; t }
   | LetIso { phi; omega; t } ->
       LetIso { phi; omega = subst_iso omega; t = subst_iso_in_term t }
+  | AppGamma { gamma; t } ->
+      AppGamma { gamma = subst_iso_in_gamma ~from ~into ~what:gamma;
+                 t = subst_iso_in_term t }
+  | LetIdem { phi; gamma; t } ->
+      LetIdem { phi; gamma = subst_iso_in_gamma ~from ~into ~what:gamma;
+                t = subst_iso_in_term t }
   | _ -> what
 
 let rec value_of_term (t : term) : value myresult =
@@ -148,6 +176,35 @@ let rec unify_value (u : value) (v : value) : (string * value) list myresult =
       in
       List.flatten unified
   | _ -> Error ("unable to unify " ^ show_value u ^ " and " ^ show_value v)
+
+let rec subst_gamma_in_gamma ~(from : string) ~(into : gamma) ~(what : gamma) : gamma =
+  match what with
+  | Var x when x = from -> into
+  | Direct { params; body } ->
+      Direct { params; body = subst_gamma_in_term ~from ~into ~what:body }
+  | Composed { omega; gamma } ->
+      Composed { omega; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma }
+  | _ -> what
+
+and subst_gamma_in_term ~(from : string) ~(into : gamma) ~(what : term) : term =
+  let subst what = subst_gamma_in_term ~from ~into ~what in
+  match what with
+  | Cted { c; t } -> Cted { c; t = subst t }
+  | Tuple l -> Tuple (List.map subst l)
+  | App { omega; t } -> App { omega; t = subst t }
+  | Let { p; t_1; t_2 } ->
+      Let { p; t_1 = subst t_1; t_2 = subst t_2 }
+  | LetIso { phi; omega; t } ->
+      LetIso { phi; omega; t = subst t }
+  | AppGamma { gamma; t } ->
+      AppGamma { gamma = subst_gamma_in_gamma ~from ~into ~what:gamma;
+                 t = subst t }
+  | LetIdem { phi; gamma; t } when phi = from ->
+      LetIdem { phi; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma; t }
+  | LetIdem { phi; gamma; t } ->
+      LetIdem { phi; gamma = subst_gamma_in_gamma ~from ~into ~what:gamma;
+                t = subst t }
+  | _ -> what
 
 let rec eval (t : term) : term myresult =
   match t with
@@ -187,7 +244,32 @@ let rec eval (t : term) : term myresult =
   | LetIso { phi; omega; t } ->
       let omega = eval_iso omega in
       subst_iso_in_term ~from:phi ~into:omega ~what:t |> eval
+  | AppGamma { gamma; t } -> begin
+      let g = eval_gamma gamma in
+      match g with
+      | Direct { params; body } ->
+          let** v = Result.bind (eval t) value_of_term in
+          let** unified = unify_value params v in
+          List.fold_left
+            (fun t (from, into) ->
+              subst ~from ~into:(term_of_value into) ~what:t)
+            body unified
+          |> eval
+      | Composed { omega; gamma } ->
+          eval (App { omega = Invert omega;
+                      t = AppGamma { gamma; t = App { omega; t } } })
+      | Var x -> Error ("unbound idem variable: " ^ x)
+    end
+  | LetIdem { phi; gamma; t } ->
+      let g = eval_gamma gamma in
+      subst_gamma_in_term ~from:phi ~into:g ~what:t |> eval
   | _ -> Ok t
+
+and eval_gamma (g : gamma) : gamma =
+  match g with
+  | Composed { omega; gamma } ->
+      Composed { omega = eval_iso omega; gamma = eval_gamma gamma }
+  | _ -> g
 
 and eval_iso (omega : iso) : iso =
   match omega with

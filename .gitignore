@@ -27,3 +27,10 @@ setup.log
 
 # Local OPAM switch
 _opam/
+
+# Files for Claude
+CLAUDE.md
+report.typ
+bnf.typ
+sample_code.idem
+sample_transducer.idem

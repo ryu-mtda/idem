@@ -9,6 +9,7 @@ type any =
   | Var of int
   | Ctor of any list * string
   | Inverted of any
+  | Idem of any
 
 type equation = any * any
 type subst = { what : int; into : any }
@@ -24,6 +25,7 @@ let rec subst (s : subst) : any -> any = function
   | Arrow { a; b } -> Arrow { a = subst s a; b = subst s b }
   | Ctor (l, x) -> Ctor (List.map (subst s) l, x)
   | Inverted a -> Inverted (subst s a)
+  | Idem a -> Idem (subst s a)
   | otherwise -> otherwise
 
 let tvar_map (a : any list) : (int * int) list =
@@ -43,6 +45,7 @@ let tvar_map (a : any list) : (int * int) list =
         collect b
     | Var i -> get i
     | Inverted a -> collect a
+    | Idem a -> collect a
   in
   List.iter collect a;
   IntMap.to_list !map
@@ -56,6 +59,7 @@ let rec invert_iso_type : any -> any myresult = function
   (* is this needed? *)
   | Inverted a -> Ok a
   | Var x -> Ok (Inverted (Var x))
+  | Idem _ -> Error "idem type cannot be inverted"
   | otherwise -> Error (show_any [] otherwise ^ " is not an iso type")
 
 and normalize_inv : any -> any myresult = function
@@ -66,6 +70,7 @@ and normalize_inv : any -> any myresult = function
       Arrow { a; b }
   | Inverted a -> invert_iso_type a
   | Var x -> Ok (Var x)
+  | Idem a -> Ok (Idem a)
   | otherwise -> Error (show_any [] otherwise ^ " is not an iso type")
 
 and base_of_any : any -> Types.base_type myresult = function
@@ -104,13 +109,16 @@ and show_any (map : (int * int) list) (a : any) : string =
       (fun a (what, into) -> subst { what; into = Var into } a)
       a map
   in
-  match base_of_any a with
-  | Ok a -> Types.show_base_type a
-  | Error _ -> begin
-      match iso_of_any a with
-      | Ok a -> Types.show_iso_type a
-      | Error _ -> "unreachable (neither base or iso)"
-    end
+  match a with
+  | Idem inner -> "idem " ^ show_any map inner
+  | _ ->
+    match base_of_any a with
+    | Ok a -> Types.show_base_type a
+    | Error _ -> begin
+        match iso_of_any a with
+        | Ok a -> Types.show_iso_type a
+        | Error _ -> "unreachable (neither base or iso)"
+      end
 
 let show_elt : elt -> string = function
   | Mono a -> show_any [] a
@@ -150,6 +158,7 @@ let rec occurs (x : int) : any -> bool = function
   | BiArrow { a; b } | Arrow { a; b } -> occurs x a || occurs x b
   | Var y -> x = y
   | Inverted a -> occurs x a
+  | Idem a -> occurs x a
   | _ -> false
 
 let rec unify : equation list -> subst list myresult = function
@@ -187,6 +196,7 @@ let rec unify : equation list -> subst list myresult = function
       | Ctor (l_1, x_1), Ctor (l_2, x_2)
         when x_1 = x_2 && List.compare_lengths l_1 l_2 = 0 ->
           List.combine l_1 l_2 @ e' |> unify
+      | Idem a1, Idem a2 -> (a1, a2) :: e' |> unify
       | a, b ->
           let map = tvar_map [ a; b ] in
           Error ("unable to unify " ^ show_any map a ^ " and " ^ show_any map b)
@@ -209,6 +219,7 @@ let find_generalizable (a : any) (ctx : context) : int list =
         IntSet.union (find_in_any a) (find_in_any b)
     | Var x -> IntSet.singleton x
     | Inverted a -> find_in_any a
+    | Idem a -> find_in_any a
   in
   let find_in_context ctx =
     let f = function
@@ -375,6 +386,98 @@ and infer_term (t : Types.term) (gen : Types.generator) (ctx : context) :
       let** ctx = generalize_iso e_1 ctx phi a_1 in
       let++ { a = a_2; e = e_2 } = infer_term t gen ctx in
       { a = a_2; e = e_1 @ e_2 }
+  | AppGamma { gamma; t } ->
+      let** { a = a_g; e = e_g } = infer_gamma gamma gen ctx in
+      let++ { a = a_t; e = e_t } = infer_term t gen ctx in
+      let fresh = Var (Types.fresh gen) in
+      { a = fresh; e = (a_g, Idem a_t) :: (fresh, a_t) :: e_g @ e_t }
+  | LetIdem { phi; gamma; t } ->
+      let** { a = a_g; e = e_g } = infer_gamma gamma gen ctx in
+      let** ctx = generalize_idem e_g ctx phi a_g in
+      let++ { a = a_t; e = e_t } = infer_term t gen ctx in
+      { a = a_t; e = e_g @ e_t }
+
+and check_direct_idempotency (params : Types.value) (body : Types.term) :
+    unit myresult =
+  let input_params = Types.collect_vars params |> StrSet.of_list in
+  let rec tail_of : Types.term -> Types.term = function
+    | Let { t_2; _ } -> tail_of t_2
+    | LetIso { t; _ } -> tail_of t
+    | LetIdem { t; _ } -> tail_of t
+    | t -> t
+  in
+  let tail = tail_of body in
+  let rec identity_vars (p : Types.value) (t : Types.term) : StrSet.t =
+    match p, t with
+    | Var x, Var y when x = y -> StrSet.singleton x
+    | Tuple ps, Tuple ts when List.compare_lengths ps ts = 0 ->
+        List.fold_left2
+          (fun acc p t -> StrSet.union acc (identity_vars p t))
+          StrSet.empty ps ts
+    | Unit, Unit -> StrSet.empty
+    | Ctor c1, Ctor c2 when c1 = c2 -> StrSet.empty
+    | Cted { c = c1; v }, Cted { c = c2; t } when c1 = c2 ->
+        identity_vars v t
+    | _ -> StrSet.empty
+  in
+  let id_vars = identity_vars params tail in
+  let body_fv = Types.free_vars_term body in
+  let used_params = StrSet.inter body_fv input_params in
+  let violating = StrSet.diff used_params id_vars in
+  if StrSet.is_empty violating then Ok ()
+  else
+    let vars_str = StrSet.elements violating |> String.concat ", " in
+    Error
+      ("idempotency check failed for "
+       ^ Types.show_value params ^ " -> " ^ Types.show_term (tail_of body)
+       ^ ": variable(s) " ^ vars_str
+       ^ " are modified by the transform but used in the body")
+
+and infer_gamma (g : Types.gamma) (gen : Types.generator) (ctx : context) :
+    inferred myresult =
+  match g with
+  | Direct { params; body } ->
+      let** () = check_direct_idempotency params body in
+      let extracted = extract_named gen params in
+      let ctx =
+        union ~weak:ctx ~strong:(StrMap.map (fun x -> Mono x) extracted)
+      in
+      let** { a = a_params; e = e_params } =
+        infer_term (Types.term_of_value params) gen ctx
+      in
+      let++ { a = a_body; e = e_body } = infer_term body gen ctx in
+      { a = Idem a_params; e = (a_params, a_body) :: e_params @ e_body }
+  | Composed { omega; gamma } ->
+      let** { a = a_omega; e = e_omega } = infer_iso omega gen ctx in
+      let++ { a = a_gamma; e = e_gamma } = infer_gamma gamma gen ctx in
+      let fresh_a = Var (Types.fresh gen) in
+      let fresh_b = Var (Types.fresh gen) in
+      { a = Idem fresh_a;
+        e = (a_omega, BiArrow { a = fresh_a; b = fresh_b })
+            :: (a_gamma, Idem fresh_b)
+            :: e_omega @ e_gamma }
+  | Var x ->
+      let++ elt = find_res x ctx in
+      { a = instantiate gen elt; e = [] }
+
+and generalize_idem (e : equation list) (ctx : context) (phi : string) (a : any)
+    : context myresult =
+  let** substs = unify e in
+  let u = List.fold_left (fun a s -> subst s a) a substs in
+  let++ _ =
+    match u with
+    | Idem _ -> Ok ()
+    | _ -> Error (show_any (tvar_map [ u ]) u ^ " is not an idem type")
+  in
+  let name =
+    if 12 < String.length phi then String.sub phi 0 9 ^ "..."
+    else Printf.sprintf "%-12s" phi
+  in
+  "| " ^ name ^ " : " ^ show_any (tvar_map [ u ]) u
+  |> boldpurple |> print_endline;
+  let ctx = List.fold_left (fun ctx s -> subst_in_context s ctx) ctx substs in
+  let generalized = Scheme { forall = find_generalizable u ctx; a = u } in
+  StrMap.add phi generalized ctx
 
 and infer_expr (expr : Types.expr) (gen : Types.generator) (ctx : context) :
     inferred myresult =

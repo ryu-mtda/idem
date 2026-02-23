@@ -31,6 +31,8 @@ rule read = parse
   | "]" { RBRACKET }
   | "*" { TIMES }
   | "|" { PIPE }
+  | "/" { SLASH }
+  | "@" { AT }
   | "," { COMMA }
   | ";" { SEMICOLON }
   | "::" { CONS }
@@ -41,6 +43,7 @@ rule read = parse
   | "let" { LET }
   | "in" { IN }
   | "iso" { ISO }
+  | "idem" { IDEM }
   | "fix" { FIX }
   | "type" { TYPE }
   | "inv" { INVERT }
