@@ -168,6 +168,20 @@ let char_ctor_map =
   let explode_string s = List.init (String.length s) (fun n -> String.get s n |> String.make 1) in
   List.fold_left2 (fun m c ctor -> StrMap.add c ctor m) StrMap.empty (explode_string chars) ctors
 
+let builtin_nat_typedef : typedef =
+  { vars = []; t = "nat"; vs = [Value "Z"; Iso { c = "S"; a = Named "nat" }] }
+
+let builtin_char_typedef : typedef =
+  { vars = []; t = "char";
+    vs = StrMap.bindings char_ctor_map |> List.map (fun (_, ctor) -> Value ctor) }
+
+let builtin_list_typedef : typedef =
+  { vars = ["'a"]; t = "list";
+    vs = [Value "Nil"; Iso { c = "Cons"; a = Product [Var "'a"; Ctor ([Var "'a"], "list")] }] }
+
+let builtin_typedefs : typedef list =
+  [builtin_nat_typedef; builtin_char_typedef; builtin_list_typedef]
+
 let rec term_of_value : value -> term = function
   | Unit -> Unit
   | Var x -> Var x

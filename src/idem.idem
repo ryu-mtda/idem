@@ -1,5 +1,3 @@
-type nat = Z | S of nat
-
 iso rec add = case
 | (m, Z)   <-> (m, Z)
 | (m, S n) <-> let (m, n) = add (S m, n) in (m, S n)

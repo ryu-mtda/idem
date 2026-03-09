@@ -18,7 +18,13 @@ let () =
     let** { t; ts } = read_program Sys.argv.(1) |> to_syntax in
     (* show_term t |> print_endline; *)
     let gen = new_generator () in
-    let** ctx = build_ctx gen ts |> to_type in
+    let user_type_names =
+      List.fold_left (fun acc (td : Types.typedef) -> StrSet.add td.t acc) StrSet.empty ts
+    in
+    let builtins =
+      List.filter (fun (td : Types.typedef) -> not (StrSet.mem td.t user_type_names)) builtin_typedefs
+    in
+    let** ctx = build_ctx gen (builtins @ ts) |> to_type in
     let** inferred = Result.bind (infer_term t gen ctx) finalize |> to_type in
     let** _ = base_of_any inferred |> to_whatever in
     let++ evaluated = Eval.eval t |> to_runtime in

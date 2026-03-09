@@ -62,6 +62,7 @@ type program = { ts : typedef list; t : term }
 type generator
 
 val char_ctor_map : string StrMap.t
+val builtin_typedefs : typedef list
 
 val term_of_value : value -> term
 val term_of_expr : expr -> term
