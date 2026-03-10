@@ -45,12 +45,10 @@ dune exec idem -- path/to/program.idem
 This example from `src/idem.idem` shows how to define an idempotent function using an isomorphism for addition:
 
 ```ocaml
-type nat = NatZero | NatSucc of nat
-
 (* Define an isomorphism for addition: add(m, n) = (m+n, n) *)
 iso rec add = case
-| (m, NatZero)   <-> (m, NatZero)
-| (m, NatSucc n) <-> let (m, n) = add (NatSucc m, n) in (m, NatSucc n)
+| (m, Z)   <-> (m, Z)
+| (m, S n) <-> let (m, n) = add (S m, n) in (m, S n)
 in
 
 (* Define an idempotent function f(x, y) = add_inv(gamma(add(x, y)))
