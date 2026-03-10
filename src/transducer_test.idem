@@ -1,0 +1,7 @@
+iso swap_ab = isot
+  @q
+  | 'a' / 'b'
+  | 'b' / 'a'
+  | c / c
+in
+inv swap_ab "abcba"

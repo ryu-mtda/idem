@@ -36,12 +36,15 @@ rule read = parse
   | "," { COMMA }
   | ";" { SEMICOLON }
   | "::" { CONS }
+  | "-->" { LONGARROW }
   | "->" { ARROW }
   | "<->" { BIARROW }
   | "=" { EQUAL }
   | "unit" { UNIT }
   | "let" { LET }
   | "in" { IN }
+  | "isot" { ISOT }
+  | "idemt" { IDEMT }
   | "iso" { ISO }
   | "idem" { IDEM }
   | "fix" { FIX }

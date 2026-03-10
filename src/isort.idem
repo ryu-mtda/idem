@@ -1,6 +1,4 @@
 type bool    = False | True
-type 'a list = Nil (* [] *) | Cons (* :: *) of 'a * 'a list
-type nat     = Z (* 0 *) | S (* n *) of nat
 
 iso recover f = case i <->
   let (o, g) = f i in
@@ -35,4 +33,3 @@ iso rec nat_lt = case
 in
 
 isort nat_lt [10; 5; 5; 1; 2; 9; 7; 8; 0; 4; 6; 5; 6]
-

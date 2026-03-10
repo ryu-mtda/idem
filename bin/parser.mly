@@ -4,7 +4,7 @@
 
 %token EOF LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET TIMES PIPE COMMA SEMICOLON CONS
   ARROW BIARROW EQUAL UNIT LET IN ISO IDEM FIX TYPE INVERT REC OF FUN CASE MATCH WITH
-  AT SLASH
+  AT SLASH ISOT IDEMT LONGARROW
 %token <int> NAT
 %token <char> CHAR
 %token <string> TVAR VAR CTOR STRING
@@ -19,6 +19,9 @@
 %type <value * expr> biarrowed
 %type <iso> iso_grouped iso_almost iso
 %type <idem> idem
+%type <transducer_rule> transducer_rule
+%type <transducer_state> transducer_state
+%type <transducer_state list> transducer_body
 %type <term> term_grouped term_almost term term_nonlet
 %%
 
@@ -104,12 +107,29 @@ iso_almost:
   | omega = iso_grouped; { omega }
   | INVERT; omega = iso_grouped; { Invert omega }
   | omega_1 = iso_almost; omega_2 = iso_grouped; { App { omega_1; omega_2 } }
+  | ISOT; states = transducer_body; { IsoTransducer states }
 
 iso:
   | omega = iso_almost; { omega }
   | CASE; PIPE?; p = separated_nonempty_list(PIPE, biarrowed); { Pairs p }
   | FIX; phi = VAR; ARROW; omega = iso; { Fix { phi; omega } }
   | FUN; params = VAR+; ARROW; omega = iso; { lambdas_of_params params omega }
+
+transducer_rule:
+  | input = value_almost; SLASH; output = term_almost;
+    LONGARROW; next = VAR;
+    { { input; output; next_state = Some next } }
+  | input = value_almost; SLASH; output = term_almost;
+    { { input; output; next_state = None } }
+
+transducer_state:
+  | AT; state_name = VAR;
+    PIPE?; rules = separated_nonempty_list(PIPE, transducer_rule);
+    { { state_name; rules } }
+
+transducer_body:
+  | states = transducer_state+;
+    { states }
 
 idem:
   | params = value; ARROW; body = term;
@@ -118,6 +138,8 @@ idem:
     { Composed { omega; gamma = g } }
   | x = VAR;
     { let lmao : idem = Var x in lmao }
+  | IDEMT; states = transducer_body;
+    { let lmao : idem = IdemTransducer states in lmao }
 
 term_grouped:
   | LPAREN; t = term; RPAREN; { t }

@@ -479,6 +479,23 @@ and infer_idem (g : Types.idem) (gen : Types.generator) (ctx : context) :
   | Var x ->
       let++ elt = find_res x ctx in
       { a = instantiate gen elt; e = [] }
+  | IdemTransducer states ->
+      let fresh_elem = Var (Types.fresh gen) in
+      let++ rule_results =
+        List.map (fun (st : Types.transducer_state) ->
+          List.map (fun (r : Types.transducer_rule) ->
+            let extracted = extract_named gen r.input in
+            let ctx' = union ~weak:ctx ~strong:(StrMap.map (fun x -> Mono x) extracted) in
+            let** { a = a_in; e = e_in } =
+              infer_term (Types.term_of_value r.input) gen ctx'
+            in
+            let++ { a = _; e = e_out } = infer_term r.output gen ctx' in
+            (a_in, fresh_elem) :: e_in @ e_out
+          ) st.rules |> bind_all
+        ) states |> bind_all
+      in
+      let es = List.flatten (List.flatten rule_results) in
+      { a = Idem (Ctor ([fresh_elem], "list")); e = es }
 
 and generalize_idem (e : equation list) (ctx : context) (phi : string) (a : any)
     : context myresult =
@@ -568,6 +585,24 @@ and infer_iso (omega : Types.iso) (gen : Types.generator) (ctx : context) :
       let++ { a; e } = infer_iso omega gen ctx in
       let fresh = Var (Types.fresh gen) in
       { a = fresh; e = (fresh, Inverted a) :: e }
+  | IsoTransducer states ->
+      let fresh_in = Var (Types.fresh gen) in
+      let fresh_out = Var (Types.fresh gen) in
+      let++ rule_results =
+        List.map (fun (st : Types.transducer_state) ->
+          List.map (fun (r : Types.transducer_rule) ->
+            let extracted = extract_named gen r.input in
+            let ctx' = union ~weak:ctx ~strong:(StrMap.map (fun x -> Mono x) extracted) in
+            let** { a = a_in; e = e_in } =
+              infer_term (Types.term_of_value r.input) gen ctx'
+            in
+            let++ { a = a_out; e = e_out } = infer_term r.output gen ctx' in
+            (a_in, fresh_in) :: (a_out, fresh_out) :: e_in @ e_out
+          ) st.rules |> bind_all
+        ) states |> bind_all
+      in
+      let es = List.flatten (List.flatten rule_results) in
+      { a = BiArrow { a = Ctor ([fresh_in], "list"); b = Ctor ([fresh_out], "list") }; e = es }
 
 let rec any_of_base ~(var_map : int StrMap.t) ~(arity_map : int StrMap.t) :
     Types.base_type -> any myresult = function

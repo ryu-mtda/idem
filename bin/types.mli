@@ -32,11 +32,24 @@ and iso =
   | Var of string
   | App of { omega_1 : iso; omega_2 : iso }
   | Invert of iso
+  | IsoTransducer of transducer_state list
 
-type idem =
+and transducer_rule = {
+  input : value;
+  output : term;
+  next_state : string option;
+}
+
+and transducer_state = {
+  state_name : string;
+  rules : transducer_rule list;
+}
+
+and idem =
   | Direct of { params : value; body : term }
   | Composed of { omega : iso; gamma : idem }
   | Var of string
+  | IdemTransducer of transducer_state list
 
 and term =
   | Unit
@@ -84,6 +97,9 @@ val show_iso_type : iso_type -> string
 val show_value : value -> string
 val show_expr : expr -> string
 val show_pairs : (value * expr) list -> string
+val show_transducer_rule : transducer_rule -> string
+val show_transducer_state : transducer_state -> string
+val show_transducer : transducer_state list -> string
 val show_iso : iso -> string
 val show_pairs_lhs : value -> (value * expr) list -> string
 val show_idem : idem -> string

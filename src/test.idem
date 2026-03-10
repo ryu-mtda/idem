@@ -1,6 +1,4 @@
 type    bool = False | True
-type     nat = Z | S of nat
-type 'a list = Nil | Cons of 'a * 'a list
 
 iso rec len = case
 | []      <-> (0, [])
@@ -15,4 +13,3 @@ iso rec split = case
 | (x, y) :: t <-> let (xs, ys) = split t in (x :: xs, y :: ys) in
 
 split (map len [[True; False]; []; [False]])
-

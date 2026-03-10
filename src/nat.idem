@@ -1,8 +1,6 @@
 type bool            = False | True
 type 'a option       = None | Some of 'a
 type ('l, 'r) either = Left of 'l | Right of 'r
-type 'a list         = Nil (* [] *) | Cons (* :: *) of 'a * 'a list
-type nat             = Z (* 0 *) | S (* n *) of nat
 type ord             = Lt | Eq | Gt
 type parity          = Even | Odd
 
@@ -51,4 +49,3 @@ iso rec fib = case
 in
 
 (fib 9, inv fib (8, 13))
-

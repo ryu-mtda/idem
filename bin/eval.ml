@@ -50,6 +50,20 @@ let rec invert (omega : iso) : iso =
   | App { omega_1; omega_2 } ->
       App { omega_1 = invert omega_1; omega_2 = invert omega_2 }
   | Invert omega -> omega
+  | IsoTransducer states ->
+      (* Swap input/output in each rule: output becomes input pattern, input becomes output term *)
+      let rec vot : term -> value = function
+        | Unit -> Unit | Var x -> Var x | Ctor x -> Ctor x
+        | Cted { c; t } -> Cted { c; v = vot t }
+        | Tuple l -> Tuple (List.map vot l)
+        | _ -> failwith "cannot invert transducer: output is not a simple value"
+      in
+      let invert_rule (r : transducer_rule) : transducer_rule =
+        { input = vot r.output; output = term_of_value r.input; next_state = r.next_state }
+      in
+      IsoTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map invert_rule st.rules }
+      ) states)
 
 let rec subst_in_idem ~(from : string) ~(into : term) ~(what : idem) : idem =
   match what with
@@ -57,6 +71,13 @@ let rec subst_in_idem ~(from : string) ~(into : term) ~(what : idem) : idem =
       Direct { params; body = subst ~from ~into ~what:body }
   | Composed { omega; gamma } ->
       Composed { omega; gamma = subst_in_idem ~from ~into ~what:gamma }
+  | IdemTransducer states ->
+      IdemTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map (fun (r : transducer_rule) ->
+          if contains_value from r.input then r
+          else { r with output = subst ~from ~into ~what:r.output }
+        ) st.rules }
+      ) states)
   | _ -> what
 
 and subst ~(from : string) ~(into : term) ~(what : term) : term =
@@ -97,6 +118,7 @@ let rec subst_iso ~(from : string) ~(into : iso) ~(what : iso) : iso =
   | App { omega_1; omega_2 } ->
       App { omega_1 = subst_iso omega_1; omega_2 = subst_iso omega_2 }
   | Invert omega -> Invert (subst_iso omega)
+  | IsoTransducer _ -> what
   | _ -> what
 
 and subst_iso_in_expr ~(from : string) ~(into : iso) ~(what : expr) : expr =
@@ -124,6 +146,12 @@ let rec subst_iso_in_idem ~(from : string) ~(into : iso) ~(what : idem) : idem =
       Composed { omega = subst_iso ~from ~into ~what:omega;
                  gamma = subst_iso_in_idem ~from ~into ~what:gamma }
   | Var _ -> what
+  | IdemTransducer states ->
+      IdemTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map (fun (r : transducer_rule) ->
+          { r with output = subst_iso_in_term ~from ~into ~what:r.output }
+        ) st.rules }
+      ) states)
 
 and subst_iso_in_term ~(from : string) ~(into : iso) ~(what : term) : term =
   let subst_iso_in_term what = subst_iso_in_term ~from ~into ~what in
@@ -192,6 +220,12 @@ let rec subst_gamma_in_idem ~(from : string) ~(into : idem) ~(what : idem) : ide
       Direct { params; body = subst_gamma_in_term ~from ~into ~what:body }
   | Composed { omega; gamma } ->
       Composed { omega; gamma = subst_gamma_in_idem ~from ~into ~what:gamma }
+  | IdemTransducer states ->
+      IdemTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map (fun (r : transducer_rule) ->
+          { r with output = subst_gamma_in_term ~from ~into ~what:r.output }
+        ) st.rules }
+      ) states)
   | _ -> what
 
 and subst_gamma_in_term ~(from : string) ~(into : idem) ~(what : term) : term =
@@ -218,6 +252,25 @@ and subst_gamma_in_term ~(from : string) ~(into : idem) ~(what : term) : term =
       AppFun { f = subst f; t = subst t }
   | _ -> what
 
+let rec value_list_of_value (v : value) : value list option =
+  match v with
+  | Ctor "Nil" -> Some []
+  | Cted { c = "Cons"; v = Tuple [hd; tl] } ->
+      Option.map (fun tl -> hd :: tl) (value_list_of_value tl)
+  | _ -> None
+
+let term_list_to_term (l : term list) : term =
+  List.fold_right
+    (fun t acc -> Cted { c = "Cons"; t = Tuple [t; acc] })
+    l (Ctor "Nil")
+
+let rec term_to_term_list (t : term) : term list option =
+  match t with
+  | Ctor "Nil" -> Some []
+  | Cted { c = "Cons"; t = Tuple [hd; tl] } ->
+      Option.map (fun tl -> hd :: tl) (term_to_term_list tl)
+  | _ -> None
+
 let rec eval (t : term) : term myresult =
   match t with
   | Tuple l ->
@@ -241,6 +294,12 @@ let rec eval (t : term) : term myresult =
               subst ~from ~into:(term_of_value into) ~what:t)
             (term_of_expr e) unified
           |> eval
+      | IsoTransducer states ->
+          let** input_list =
+            value_list_of_value v'
+            |> Option.to_result ~none:("transducer expects a list input, got: " ^ show_value v')
+          in
+          eval_transducer states input_list false
       | _ -> Ok t
     end
   | Let { p; t_1; t_2 } -> begin
@@ -275,6 +334,13 @@ let rec eval (t : term) : term myresult =
       | Composed { omega; gamma } ->
           eval (App { omega = Invert omega;
                       t = AppGamma { gamma; t = App { omega; t } } })
+      | IdemTransducer states ->
+          let** v = Result.bind (eval t) value_of_term in
+          let** input_list =
+            value_list_of_value v
+            |> Option.to_result ~none:("idemt expects a list input, got: " ^ show_value v)
+          in
+          eval_transducer states input_list true
       | Var x -> Error ("unbound idem variable: " ^ x)
     end
   | LetIdem { phi; gamma; t } ->
@@ -295,6 +361,7 @@ and eval_idem (g : idem) : idem =
   match g with
   | Composed { omega; gamma } ->
       Composed { omega = eval_iso omega; gamma = eval_idem gamma }
+  | IdemTransducer _ -> g
   | _ -> g
 
 and eval_iso (omega : iso) : iso =
@@ -308,4 +375,49 @@ and eval_iso (omega : iso) : iso =
       | _ -> omega
     end
   | Invert omega -> eval_iso omega |> invert |> eval_iso
+  | IsoTransducer _ -> omega
   | _ -> omega
+
+and eval_transducer (states : transducer_state list) (input_list : value list)
+    (flatten_output : bool) : term myresult =
+  let state_map =
+    List.fold_left
+      (fun acc (st : transducer_state) -> StrMap.add st.state_name st.rules acc)
+      StrMap.empty states
+  in
+  let initial_state = (List.hd states).state_name in
+  let rec process (current_state : string) (remaining : value list)
+      (acc : term list) : term myresult =
+    match remaining with
+    | [] -> Ok (term_list_to_term (List.rev acc))
+    | elem :: rest ->
+        let** rules =
+          StrMap.find_opt current_state state_map
+          |> Option.to_result ~none:("transducer state not found: " ^ current_state)
+        in
+        let** rule =
+          List.find_opt (fun (r : transducer_rule) -> matches r.input elem) rules
+          |> Option.to_result ~none:("no matching rule for element " ^ show_value elem ^ " in state " ^ current_state)
+        in
+        let** unified = unify_value rule.input elem in
+        let output =
+          List.fold_left
+            (fun t (from, into) ->
+              subst ~from ~into:(term_of_value into) ~what:t)
+            rule.output unified
+        in
+        let** output_evaled = eval output in
+        let next = match rule.next_state with
+          | Some s -> s
+          | None -> current_state
+        in
+        if flatten_output then
+          match term_to_term_list output_evaled with
+          | Some items ->
+              process next rest (List.rev_append items acc)
+          | None ->
+              process next rest (output_evaled :: acc)
+        else
+          process next rest (output_evaled :: acc)
+  in
+  process initial_state input_list []

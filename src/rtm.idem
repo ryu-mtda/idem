@@ -1,6 +1,4 @@
 type bool    = False | True
-type nat     = Z (* 0 *) | S (* n *) of nat
-type 'a list = Nil (* [] *) | Cons (* :: *) of 'a * 'a list
 type q       = Init | Next | Flip | Done | Back | Final
 type s       = B | A0 | A1 | A2 | A3
 

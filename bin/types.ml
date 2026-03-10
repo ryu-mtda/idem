@@ -32,11 +32,24 @@ and iso =
   | Var of string
   | App of { omega_1 : iso; omega_2 : iso }
   | Invert of iso
+  | IsoTransducer of transducer_state list
 
-type idem =
+and transducer_rule = {
+  input : value;
+  output : term;
+  next_state : string option;
+}
+
+and transducer_state = {
+  state_name : string;
+  rules : transducer_rule list;
+}
+
+and idem =
   | Direct of { params : value; body : term }
   | Composed of { omega : iso; gamma : idem }
   | Var of string
+  | IdemTransducer of transducer_state list
 
 and term =
   | Unit
@@ -407,6 +420,7 @@ and show_iso : iso -> string = function
   | App { omega_1; omega_2 } -> show_iso omega_1 ^ " {" ^ show_iso omega_2 ^ "}"
   | Invert (Var _ as omega) -> "inv " ^ show_iso omega
   | Invert omega -> "inv {" ^ show_iso omega ^ "}"
+  | IsoTransducer _ -> "isot ..."
 
 let show_pairs_lhs (v : value) (pairs : (value * expr) list) : string =
   let init = "match " ^ show_value v ^ " with" in
@@ -414,12 +428,27 @@ let show_pairs_lhs (v : value) (pairs : (value * expr) list) : string =
     (fun acc (v, _) -> acc ^ "\n  | " ^ show_value v ^ " <-> ...")
     init pairs
 
-let rec show_idem : idem -> string = function
+let rec show_transducer_rule (r : transducer_rule) : string =
+  let next = match r.next_state with
+    | Some s -> " --> " ^ s
+    | None -> ""
+  in
+  show_value r.input ^ " / " ^ show_term r.output ^ next
+
+and show_transducer_state (s : transducer_state) : string =
+  "@" ^ s.state_name ^ " " ^
+  (List.map show_transducer_rule s.rules |> String.concat " | ")
+
+and show_transducer (states : transducer_state list) : string =
+  List.map show_transducer_state states |> String.concat " "
+
+and show_idem : idem -> string = function
   | Direct { params; body } ->
       show_value params ^ " -> " ^ show_term body
   | Composed { omega; gamma } ->
       show_iso omega ^ " with " ^ show_idem gamma
   | Var x -> x
+  | IdemTransducer states -> "idemt " ^ show_transducer states
 
 and show_term : term -> string = function
   | Unit -> "()"
@@ -571,6 +600,13 @@ and free_vars_in_idem : idem -> StrSet.t = function
       StrSet.diff (free_vars_term body) bound
   | Composed { gamma; _ } -> free_vars_in_idem gamma
   | Var _ -> StrSet.empty
+  | IdemTransducer states ->
+      List.fold_left (fun acc (st : transducer_state) ->
+        List.fold_left (fun acc (r : transducer_rule) ->
+          let bound = collect_vars r.input |> StrSet.of_list in
+          StrSet.union acc (StrSet.diff (free_vars_term r.output) bound)
+        ) acc st.rules
+      ) StrSet.empty states
 
 let new_generator () : generator = { i = 0 }
 
@@ -656,6 +692,12 @@ and rewrite_app_to_appgamma_in_idem (phi : string) (g : idem) : idem =
   | Composed { omega; gamma } ->
       Composed { omega; gamma = rewrite_app_to_appgamma_in_idem phi gamma }
   | Var _ -> g
+  | IdemTransducer states ->
+      IdemTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map (fun (r : transducer_rule) ->
+          { r with output = rewrite_app_to_appgamma phi r.output }
+        ) st.rules }
+      ) states)
 
 let rec rewrite_app_to_appfun (name : string) (t : term) : term =
   match t with
@@ -696,3 +738,9 @@ and rewrite_app_to_appfun_in_idem (name : string) (g : idem) : idem =
   | Composed { omega; gamma } ->
       Composed { omega; gamma = rewrite_app_to_appfun_in_idem name gamma }
   | Var _ -> g
+  | IdemTransducer states ->
+      IdemTransducer (List.map (fun (st : transducer_state) ->
+        { st with rules = List.map (fun (r : transducer_rule) ->
+          { r with output = rewrite_app_to_appfun name r.output }
+        ) st.rules }
+      ) states)
